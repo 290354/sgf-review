@@ -182,7 +182,11 @@ class BoardCanvas:
 
     def _region_of(self, x: int, y: int, grow: int = 0) -> Tuple[int, int, int, int]:
         cx, cy = self.center(x, y)
-        m = self.stone_r + self.shadow_margin + grow
+        # 贴图(含投影)可能比 stone_r + shadow_margin 更大, 用实际尺寸兜底,
+        # 否则清空区域会切掉相邻棋子的边缘, 留下"半圆"残影.
+        sw = max(s.size[0] for s in self._sprites.values()) / 2.0
+        sh = max(s.size[1] for s in self._sprites.values()) / 2.0
+        m = max(self.stone_r + self.shadow_margin, sw, sh) + grow + 1
         return (int(cx - m), int(cy - m), int(cx + m), int(cy + m))
 
     def _repaint(self, box: Tuple[int, int, int, int]) -> None:

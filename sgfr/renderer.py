@@ -1130,6 +1130,9 @@ class Renderer:
         x, y, w, h = box
         if h < 68 * k:
             return False
+        # 前半盘不剧透「最大失误」, 留给赛后复盘
+        if idx < len(self.moves) * 0.45:
+            return False
         zh = self.lang == "zh"
         compact = h < 132 * k
         rate = ser.matched_moves / max(1, ser.judged_moves) * 100
@@ -1199,6 +1202,16 @@ class Renderer:
             return
         if self._ai_summary_block(img, idx, box, k):
             return
+        # 分析尚未覆盖到这里时, 明确告诉观众从第几手开始
+        if self.show_analysis and self.series is not None and self.series.count:
+            first = next((i + 1 for i, p in enumerate(self.series.points)
+                          if p is not None), 0)
+            if first and idx + 1 < first:
+                self._text(img, (x, y), 
+                           (f"AI 分析 · 第 {first} 手起" if self.lang == "zh"
+                            else f"AI analysis starts at move {first}"),
+                           "sans", max(9, int(12 * k)), self.th.accent2, "la", 0.9, 0.05 * 12 * k)
+                return
         lines: List[Tuple[str, str]] = []
         meta: List[str] = []
         kk = describe_komi(info.komi)
