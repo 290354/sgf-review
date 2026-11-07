@@ -917,18 +917,21 @@ class Renderer:
             lead.draw_cursor(img, idx, lv, self.th, ck)
             self._text(img, (bx, ly + 3 * ck), lead.label, "sans", max(8, int(10.5 * ck)),
                        self.th.faint, "la", 0.95, 0.08 * 10.5 * ck)
+            # lr / ly 对「本手无目差数据」同样要可用: 以前只在 lv 非空时
+            # 才给 lr 赋值, 部分分析的棋谱走到下面的标签绘制会直接崩.
+            lr = lead.box.x + lead.box.w
             if lv is not None:
                 sign = "+" if lv >= 0 else "−"
                 txt = f"{sign}{abs(lv):.1f}"
                 col = self.th.text if abs(lv) < 3 else (
                     (0.92, 0.62, 0.42) if lv > 0 else (0.62, 0.78, 0.92))
-                lr = lead.box.x + lead.box.w
                 self._text(img, (lr, ly + 2 * ck), txt, "sans_bold",
                            max(11, int(16 * ck)), col, "ra", 1.0, 0.01 * 16 * ck)
-            self._text(img, (lr, ly + 18 * ck),
-                       ("黑领先" if lv is not None and lv > 0 else ("白领先" if lv is not None else ""))
-                       if self.lang == "zh" else "",
-                       "sans", max(7, int(8.5 * ck)), self.th.faint, "ra", 0.9)
+                lead_txt = (("黑领先" if lv > 0 else "白领先")
+                            if self.lang == "zh" else "")
+                if lead_txt:
+                    self._text(img, (lr, ly + 18 * ck), lead_txt,
+                               "sans", max(7, int(8.5 * ck)), self.th.faint, "ra", 0.9)
 
     # ------------------------------------------------------------------ #
     def _ai_card(self, img: Image.Image, idx: int, k: float) -> None:

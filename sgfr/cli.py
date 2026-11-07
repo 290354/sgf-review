@@ -323,9 +323,21 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
         if target is None:
             stem = os.path.splitext(os.path.basename(path))[0]
             suffix = f"_g{gi + 1}" if len(rv_list) > 1 else ""
-            ext = ".webm" if args.codec == "vp9" else (".mp4" if args.codec != "hevc" else ".mp4")
+            ext = ".webm" if args.codec == "vp9" else ".mp4"
             os.makedirs("output", exist_ok=True)
             target = os.path.join("output", f"{stem}{suffix}_{args.theme}{ext}")
+
+        # 容器由 codec 决定, 避免用户给的后缀与真实容器不符
+        # (例如 vp9 写成 .mp4, 以前会把 WebM 内容塞进 MP4 文件名)
+        ext = os.path.splitext(target)[1].lower()
+        if args.codec == "vp9" and ext in (".mp4", ".mov", ".m4v"):
+            target = os.path.splitext(target)[0] + ".webm"
+            if not args.quiet:
+                print(f"提示: vp9 使用 WebM 容器, 输出改名为 {target}")
+        elif args.codec != "vp9" and ext == ".webm":
+            target = os.path.splitext(target)[0] + ".mp4"
+            if not args.quiet:
+                print(f"提示: 该编码使用 MP4 容器, 输出改名为 {target}")
 
         os.makedirs(os.path.dirname(os.path.abspath(target)) or ".", exist_ok=True)
         t0 = time.time()
@@ -360,6 +372,7 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
                 print(f"片段模式: 帧 {f0}-{f1} ({(f1 - f0) / args.fps:.1f}s)")
 
         work = tempfile.mkdtemp(prefix="sgfr_")
+        seg_ext = ".webm" if args.codec == "vp9" else ".mp4"
         try:
             # --- 音轨 ---
             wav = os.path.join(work, "audio.wav")
@@ -376,6 +389,9 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
                 jobs = 1  # 片段模式不并行, 避免起点状态不一致
             jobs = max(1, min(jobs, max(1, nframes // 45)))
 
+            if args.codec == "hevc" and not senc.has_encoder("libx265") and not args.quiet:
+                print("提示: 当前 ffmpeg 缺少 libx265, HEVC 已降级为 H.264 编码")
+
             span = f1 - f0
             if not args.quiet:
                 print(f"\n渲染中: {span} 帧 · {w}x{h}@{args.fps} · "
@@ -384,9 +400,12 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
                       f"{len(rv.moves)} 手")
 
             if jobs <= 1:
-                seg = os.path.join(work, "seg_000.mp4")
+                seg = os.path.join(work, f"seg_000{seg_ext}")
+                # 片段模式下音轨要跳到 f0 对应的时间, 否则音画错位
+                aoff = (f0 / args.fps) if args.range else 0.0
                 proc = senc.open_writer(seg, w, h, args.fps, args.quality,
-                                        args.codec, audio=wav if has_audio else None)
+                                        args.codec, audio=wav if has_audio else None,
+                                        audio_offset=aoff)
                 assert proc.stdin is not None
                 try:
                     for i in range(f0, f1):
@@ -400,10 +419,11 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
                 shutil.move(seg, target)
             else:
                 segs = _run_parallel(nframes, jobs, work, cfg, args.quiet, t0)
-                joined = os.path.join(work, "joined.mp4")
+                joined = os.path.join(work, f"joined{seg_ext}")
                 senc.concat_segments(segs, joined, work)
                 if has_audio:
-                    senc.mux_audio(joined, wav, target)
+                    senc.mux_audio(joined, wav, target, codec=args.codec,
+                                   audio_offset=(f0 / args.fps) if args.range else 0.0)
                 else:
                     shutil.move(joined, target)
 
@@ -444,9 +464,13 @@ def _bar(done: int, total: int, t0: float) -> None:
     filled = int(width * frac)
     bar = "█" * filled + "░" * (width - filled)
     el = time.time() - t0
-    eta = el / max(1e-6, frac) - el
+    # done==0 时 frac 为 0, 旧的 `el / 1e-6` 会算出几小时的荒谬剩余时间
+    if done > 0 and frac > 0:
+        eta_txt = human_time(el / frac - el)
+    else:
+        eta_txt = "--:--"
     sys.stdout.write(f"\r  [{bar}] {frac * 100:5.1f}%  {done}/{total}  "
-                     f"剩余 {human_time(eta)}   ")
+                     f"剩余 {eta_txt}   ")
     sys.stdout.flush()
 
 
@@ -556,9 +580,10 @@ def _run_parallel(nframes: int, jobs: int, work: str, cfg,
                   quiet: bool, t0: float):
     """分段并行渲染; 进程被杀时自动降级重试."""
     attempt = jobs
+    seg_ext = ".webm" if cfg.get("codec") == "vp9" else ".mp4"
     while True:
         bounds = _split(nframes, attempt)
-        tasks = [(a, b, os.path.join(work, f"seg_{k:03d}.mp4"), cfg)
+        tasks = [(a, b, os.path.join(work, f"seg_{k:03d}{seg_ext}"), cfg)
                  for k, (a, b) in enumerate(bounds)]
         try:
             done = 0

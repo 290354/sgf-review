@@ -659,6 +659,7 @@ def parse_sgf(path: str, line_strategy: str = "longest") -> Review:
         info.komi = 0.5 if info.handicap else None
 
     review.total_nodes = sum(1 for _ in _walk(root))
+    review.series = lz.build_series(review.moves, info.size_x, info.size_y, info.komi)
     return review
 
 
@@ -696,6 +697,8 @@ def parse_collection_reviews(path: str, line_strategy: str = "longest") -> List[
         info.place = tree.get("PC").strip()
         info.rules = tree.get("RU").strip()
         info.name = tree.get("GN").strip()
+        info.source = tree.get("SO").strip()
+        info.time_limit = tree.get("TM").strip()
         line, branches = _choose_line(tree, line_strategy)
 
         rv = Review(info=info, branch_count=branches, source_encoding=enc,
@@ -761,5 +764,6 @@ def parse_collection_reviews(path: str, line_strategy: str = "longest") -> List[
             elif marks and rv.moves:
                 rv.moves[-1].marks.extend(marks)
         rv.series = lz.build_series(rv.moves, info.size_x, info.size_y, info.komi)
+        rv.total_nodes = sum(1 for _ in _walk(tree))
         out.append(rv)
     return out

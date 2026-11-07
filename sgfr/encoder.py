@@ -52,13 +52,22 @@ def _pick_codec(kind: str):
 
 
 def open_writer(path: str, w: int, h: int, fps: int, quality: str = "high",
-                codec: str = "h264", audio: Optional[str] = None) -> subprocess.Popen:
-    """打开一个 ffmpeg 进程, stdin 接受 rgb24 裸帧."""
+                codec: str = "h264", audio: Optional[str] = None,
+                audio_offset: float = 0.0) -> subprocess.Popen:
+    """打开一个 ffmpeg 进程, stdin 接受 rgb24 裸帧.
+
+    audio_offset: 只渲染片段时音频输入要跳过的时间(秒). 不加的话,
+    片段画面从中间开始而音轨仍从头播, 落子声会全部错位.
+    """
     q = QUALITY.get(quality, QUALITY["high"])
+    webm = (codec == "vp9")
     cmd = [ffmpeg_exe(), "-y", "-v", "error",
            "-f", "rawvideo", "-pix_fmt", "rgb24",
            "-s", f"{w}x{h}", "-r", str(fps), "-i", "pipe:0"]
     if audio:
+        # -ss 放在对应 -i 之前, 只作用于音频输入, 不影响裸视频流
+        if audio_offset > 0:
+            cmd += ["-ss", f"{audio_offset:.6f}"]
         cmd += ["-i", audio]
     cargs = _pick_codec(codec)
     cmd += cargs
@@ -72,8 +81,16 @@ def open_writer(path: str, w: int, h: int, fps: int, quality: str = "high",
             cmd += ["-bf", "0"]
     cmd += ["-threads", "0"]
     if audio:
-        cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest"]
-    if path.lower().endswith((".mp4", ".mov", ".m4v")):
+        if webm:
+            # WebM 容器不允许 AAC, 必须用 Opus / Vorbis
+            acodec = "libopus" if has_encoder("libopus") else "libvorbis"
+            cmd += ["-c:a", acodec, "-b:a", "128k", "-shortest"]
+        else:
+            cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest"]
+    if webm:
+        # 临时分段文件名可能是 .mp4, 显式指定容器避免把 WebM 写成 MP4
+        cmd += ["-f", "webm"]
+    elif path.lower().endswith((".mp4", ".mov", ".m4v")):
         cmd += ["-movflags", "+faststart"]
     cmd += [path]
     log = tempfile.NamedTemporaryFile(suffix=".fflog", delete=False)
@@ -122,11 +139,21 @@ def concat_segments(paths: Sequence[str], out_path: str, workdir: str) -> None:
         raise RuntimeError(f"分段拼接失败:\n{r.stderr[:1500]}")
 
 
-def mux_audio(video: str, audio: str, out_path: str, copy_video: bool = True) -> None:
-    cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", video, "-i", audio]
+def mux_audio(video: str, audio: str, out_path: str, copy_video: bool = True,
+              codec: str = "h264", audio_offset: float = 0.0) -> None:
+    cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", video]
+    if audio_offset > 0:
+        cmd += ["-ss", f"{audio_offset:.6f}"]
+    cmd += ["-i", audio]
     if copy_video:
         cmd += ["-c:v", "copy"]
-    cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", out_path]
+    if codec == "vp9":
+        acodec = "libopus" if has_encoder("libopus") else "libvorbis"
+        cmd += ["-c:a", acodec, "-b:a", "128k", "-shortest", "-f", "webm"]
+    else:
+        cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest",
+                "-movflags", "+faststart"]
+    cmd += [out_path]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"音轨合成失败:\n{r.stderr[:1500]}")
