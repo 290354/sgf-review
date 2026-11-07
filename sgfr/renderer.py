@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
@@ -21,6 +22,16 @@ from .timeline import Timeline
 # --------------------------------------------------------------------------- #
 def ease_out_cubic(p: float) -> float:
     return 1 - (1 - p) ** 3
+
+
+_BRACKET_TAG = re.compile(r"[<＜][^>＞]{0,60}[>＞]")
+
+
+def clean_event_name(name: str, fallback: str = "围 棋 对 局") -> str:
+    """赛事名清理: 去掉 <张香槟＆夏夏＆绝艺解说> 这类括注, 压缩空白."""
+    s = _BRACKET_TAG.sub(" ", name or "")
+    s = re.sub(r"\s+", " ", s).strip(" -—·、,，")
+    return s or fallback
 
 
 def ease_in_out(p: float) -> float:
@@ -724,9 +735,9 @@ class Renderer:
         info = self.rv.info
         parts = [p for p in (info.event, info.round) if p]
         if parts:
-            return "  ".join(parts)
+            return clean_event_name("  ".join(parts))
         if info.name:
-            return info.name
+            return clean_event_name(info.name)
         return "围 棋 对 局"
 
     def _draw_panel(self, img: Image.Image, t: float, idx: int, p: float,
@@ -889,8 +900,8 @@ class Renderer:
         fnt, fsz = gx.fit_font("sans", lab, w, fs, 9, 0.10)
         self._text(img, (x, y + 2 * k), lab, "sans", fsz, th.dim, "la", 1.0, 0.10 * fsz)
         if info.date:
-            self._text(img, (x, y + 28 * k), info.date, "sans", max(9, int(13 * k)),
-                       th.faint, "la", 0.95, 0.10 * 13 * k)
+            self._text(img, (x, y + max(26 * k, fsz * 1.62)), info.date, "sans",
+                       max(9, int(13 * k)), th.faint, "la", 0.95, 0.10 * 13 * k)
 
         # ---- 棋手 (并排, 给图表腾出空间) ----
         py = y + 62 * k
@@ -928,7 +939,7 @@ class Renderer:
             cb, cw = self._captures_upto(idx + 1)
             self._text(img, (sx, sy + 26 * k),
                        f"提子 {cb} : {cw}" if self.lang == "zh" else f"captures {cb} : {cw}",
-                       "sans", max(8, int(12 * k)), th.faint, "la", 0.95, 0.02 * 12 * k)
+                       "sans", max(8, int(12 * k)), th.dim, "la", 0.95, 0.02 * 12 * k)
             cap_y = sy + 44 * k
 
         # ---- 分析图表 + AI 卡 ----
@@ -1018,7 +1029,7 @@ class Renderer:
             cb, cw = self._captures_upto(idx + 1)
             self._text(img, (sx, ny + 38 * k),
                        f"提子 {cb} : {cw}" if self.lang == "zh" else f"captures {cb} : {cw}",
-                       "sans", max(8, int(13 * k)), th.faint, "la", 0.95, 0.02 * 13 * k)
+                       "sans", max(8, int(13 * k)), th.dim, "la", 0.95, 0.02 * 13 * k)
 
         # ---- 分析图表 + AI 卡 ----
         has_an = self.show_analysis and self.charts.active
@@ -1135,8 +1146,30 @@ class Renderer:
             return False
         zh = self.lang == "zh"
         compact = h < 132 * k
-        rate = ser.matched_moves / max(1, ser.judged_moves) * 100
-        worst = min(ser.key_moments, key=lambda m: m.swing) if ser.key_moments else None
+        # 只统计「已经下过」的手, 避免提前透露后面的失误
+        upto = min(idx + 1, len(ser.points))
+        judged = matched = an_cnt = 0
+        loss_sum = 0.0
+        for i in range(upto):
+            an = ser.points[i]
+            if an is None:
+                continue
+            an_cnt += 1
+            if an.swing is not None and an.swing < 0:
+                loss_sum += -an.swing
+            if not an.best or i + 1 >= len(self.moves):
+                continue
+            top = an.best[0]
+            if not top.valid or self.moves[i + 1].is_pass:
+                continue
+            judged += 1
+            nxt = self.moves[i + 1]
+            if (nxt.x, nxt.y) == (top.x, top.y):
+                matched += 1
+        rate = matched / max(1, judged) * 100
+        avg_loss = loss_sum / max(1, an_cnt)
+        past = [m for m in ser.key_moments if m.index <= idx]
+        worst = min(past, key=lambda m: m.swing) if past else None
 
         self._hair(img, x, y - 8 * k, 26 * k, 1.0, th.accent)
         self._text(img, (x, y), ("A I   复 盘" if zh else "A I   R E V I E W"),
@@ -1159,13 +1192,15 @@ class Renderer:
 
         # 细节行
         ly = by + nh + (4 if compact else 10) * k
-        loss_txt = f"平均损失 {ser.avg_loss:.1f}%"
+        loss_txt = f"平均损失 {avg_loss:.1f}%"
         if worst is not None:
-            loss_txt += f"   ·   最大失误 第 {worst.number} 手 {worst.swing:+.1f}%"
+            side = "黑" if worst.color == 1 else "白"
+            loss_txt += f"   ·   最大失误 第 {worst.number} 手（{side}）{worst.swing:+.1f}%"
         if not zh:
-            loss_txt = f"avg loss {ser.avg_loss:.1f}%"
+            loss_txt = f"avg loss {avg_loss:.1f}%"
             if worst is not None:
-                loss_txt += f"   ·   biggest drop move {worst.number} {worst.swing:+.1f}%"
+                side = "B" if worst.color == 1 else "W"
+                loss_txt += f"   ·   biggest drop move {worst.number} ({side}) {worst.swing:+.1f}%"
         fnt, fs = gx.fit_font("sans", loss_txt, w, max(8, int(11.5 * k)), 8, 0.02)
         self._text(img, (x, ly), loss_txt, "sans", fs, th.dim, "la", 0.95, 0.02)
 
@@ -1408,6 +1443,8 @@ class Renderer:
 
         sub_parts = [p for p in (info.event, info.round) if p]
         sub = "  ·  ".join(sub_parts)
+        if not sub and info.name:
+            sub = clean_event_name(info.name, "")
         if info.date:
             sub = f"{sub}  ·  {info.date}" if sub else info.date
         if not sub:

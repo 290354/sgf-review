@@ -243,6 +243,8 @@ _ENGINE_HEAD = re.compile(
 )
 _ENGINE_TAIL = re.compile(r"(计算量|playouts?)\s*\)", re.I)
 _RULE_LINE = re.compile(r"(?m)^\s*引擎规则\s*[:：].*$")
+# 绝艺/第三方引擎写在注释首行的胜率标签: /"jueyi黑65.3% 或 /"jueyi白52.2% - 6.5目
+_JUEYI_LINE = re.compile(r"(?m)^\s*/\s*[\"“”']?\s*jueyi[^\n]*$", re.I)
 
 
 def split_comment(comment: str) -> Tuple[str, str]:
@@ -250,7 +252,8 @@ def split_comment(comment: str) -> Tuple[str, str]:
     if not comment or not comment.strip():
         return "", ""
     text = comment.replace("\r\n", "\n").replace("\r", "\n").strip()
-    text = _RULE_LINE.sub("", text).strip()
+    text = _RULE_LINE.sub("", text)
+    text = _JUEYI_LINE.sub("", text).strip()
     if not text:
         return "", ""
 
@@ -479,6 +482,8 @@ def summary_lines(ser: AnalysisSeries, lang: str = "zh") -> List[Tuple[str, str]
         ("平均损失" if zh else "Avg. loss", f"{ser.avg_loss:.1f}%"),
     ]
     if worst:
+        side = ("黑" if worst.color == 1 else "白") if zh else ("B" if worst.color == 1 else "W")
         out.append(("最大失误" if zh else "Biggest drop",
-                    f"第 {worst.number} 手 {worst.swing:+.1f}%"))
+                    f"第 {worst.number} 手（{side}）{worst.swing:+.1f}%" if zh
+                    else f"move {worst.number} ({side}) {worst.swing:+.1f}%"))
     return out

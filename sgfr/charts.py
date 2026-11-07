@@ -115,7 +115,7 @@ class CurveChart:
         self.bg = self._build_bg()
         self.line = self._build_line()
         self.line_faint = self.line.copy()
-        _a = self.line_faint.getchannel("A").point(lambda v: int(v * 0.20))
+        _a = self.line_faint.getchannel("A").point(lambda v: int(v * 0.13))
         self.line_faint.putalpha(_a)
 
     # ------------------------------------------------------------------ #
