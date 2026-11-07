@@ -233,28 +233,71 @@ class Renderer:
                 int(self._chart_box[2]), int(self._chart_box[3]),
                 self.series, self.th, self._analysis_k, self.lang,
                 show_visits=True, horizontal=(self.L.mode == "portrait"),
+                show_lead=getattr(self, "_lead_visible", True),
             )
 
     # ------------------------------------------------------------------ #
     def _layout_analysis(self) -> None:
-        """分析图表 / AI 信息卡在面板中的位置."""
+        """分析图表 / AI 卡位置: 由剩余空间反推, 避免写死高度导致重叠.
+
+        同时给整个面板定统一内边距 pad, 所有子块都从 pad 开始画.
+        """
         L = self.L
+        pad = max(16, int(L.panel_w * 0.026))
+        self._pad = pad
+        iw = max(120, L.panel_w - pad * 2)
+        self._lead_visible = True
+        self._list_h = 0.0
+
         if L.mode == "portrait":
             k = L.panel_h / 610.0
-            top = L.panel_y + 240 * k
-            ch = 152 * k
-            self._chart_box = (L.panel_x, top, max(80, L.panel_w - 8), ch)
-            self._card_box = (L.panel_x, top + ch + 9 * k,
-                              max(80, L.panel_w - 8), 56 * k)
-        else:
-            k = L.panel_h / 950.0
-            top = L.panel_y + 226 * k
-            ch = 280 * k
-            # 右侧留 18px 安全边距, 避免 88.4% 这类数值贴边
-            self._chart_box = (L.panel_x, top, max(80, L.panel_w - 18), ch)
-            self._card_box = (L.panel_x, top + ch + 14 * k,
-                              max(80, L.panel_w - 18), 88 * k)
+            self._analysis_k = k
+            top = L.panel_y + 176 * k          # 赛事+棋手+分隔+手数
+            bottom = L.panel_y + L.panel_h - 20 * k
+            avail = max(72.0, bottom - top)
+            card_h = min(52 * k, max(40.0, avail * 0.30))
+            ch = avail - card_h - 8 * k
+            if ch < 110 * k:
+                self._lead_visible = False     # 竖屏空间紧: 只画胜率
+            ch = max(64.0, min(ch, 150 * k))
+            self._chart_box = (L.panel_x + pad, top, iw, ch)
+            self._card_box = (L.panel_x + pad, top + ch + 8 * k, iw, card_h)
+            self._comment_top = self._card_box[1] + card_h + 8 * k
+            self._comment_h = max(36.0, bottom - self._comment_top)
+            return
+
+        k = L.panel_h / 950.0
         self._analysis_k = k
+        top = L.panel_y + 184 * k
+        bottom = L.panel_y + L.panel_h - 40 * k   # 进度条离底边远一些
+        avail = max(110.0, bottom - top)
+
+        # 从上到下: 图表 → AI卡 → 最近手数(3行) → 注释, 间距 12k
+        gaps = 12 * k * 3
+        ch = max(150.0, min(300.0, avail * 0.44))
+        remaining = avail - ch - gaps
+        card_h = min(88 * k, max(64.0, remaining * 0.22))
+        list_h = min(78 * k, max(44.0, remaining * 0.20))
+        comment_h = remaining - card_h - list_h
+        if comment_h < 76:
+            comment_h = 76
+            list_h = remaining - card_h - 76
+            if list_h < 36:
+                list_h = 0.0
+                comment_h = max(76.0, remaining - card_h)
+        self._lead_visible = True
+        if ch < 92 * k:
+            self._lead_visible = False
+            ch = max(92 * k, min(ch, 200 * k))
+            list_h = 0.0
+            comment_h = max(76.0, avail - ch - card_h - 12 * k * 2)
+
+        self._chart_box = (L.panel_x + pad, top, iw, ch)
+        self._card_box = (L.panel_x + pad, top + ch + 9 * k, iw, card_h)
+        self._list_top = self._card_box[1] + card_h + 9 * k
+        self._list_h = list_h
+        self._comment_top = self._list_top + list_h + 9 * k
+        self._comment_h = max(36.0, bottom - self._comment_top)
 
     def _build_board_shadow(self) -> None:
         bs = self.L.board_size
@@ -845,17 +888,17 @@ class Renderer:
 
         cur = self.series.wr_at(idx)
         wr_r = wr.box.x + wr.box.w
-        # 标题左
-        self._text(img, (bx, by - 2 * ck), wr.label, "sans", max(8, int(10.5 * ck)),
+        # 标题画在图表自身头部留白里 (CurveChart.head), 不再外溢压住上一块
+        self._text(img, (bx, by + 3 * ck), wr.label, "sans", max(8, int(10.5 * ck)),
                    self.th.faint, "la", 0.95, 0.08 * 10.5 * ck)
         if cur is not None:
             wr.draw_cursor(img, idx, cur, self.th, ck)
             txt = f"{cur:.1f}%"
             col = self.th.accent2 if self.th.dark else mix(self.th.accent2, (0.1, 0.1, 0.1), 0.35)
-            self._text(img, (wr_r, by - 8 * ck), txt, "sans_bold", max(13, int(24 * ck)),
-                       col, "ra", 1.0, 0.01 * 19 * ck)
+            self._text(img, (wr_r, by + 2 * ck), txt, "sans_bold", max(12, int(20 * ck)),
+                       col, "ra", 1.0, 0.01 * 20 * ck)
         elif idx >= 0:
-            self._text(img, (wr_r, by - 3 * ck),
+            self._text(img, (wr_r, by + 3 * ck),
                        "无分析" if self.lang == "zh" else "no analysis",
                        "sans", max(8, int(10 * ck)), self.th.faint, "ra", 0.95)
 
@@ -872,7 +915,7 @@ class Renderer:
             lv = self.series.lead_at(idx)
             lead.blit(img, cx + 1)
             lead.draw_cursor(img, idx, lv, self.th, ck)
-            self._text(img, (bx, ly - 2 * ck), lead.label, "sans", max(8, int(10.5 * ck)),
+            self._text(img, (bx, ly + 3 * ck), lead.label, "sans", max(8, int(10.5 * ck)),
                        self.th.faint, "la", 0.95, 0.08 * 10.5 * ck)
             if lv is not None:
                 sign = "+" if lv >= 0 else "−"
@@ -880,9 +923,9 @@ class Renderer:
                 col = self.th.text if abs(lv) < 3 else (
                     (0.92, 0.62, 0.42) if lv > 0 else (0.62, 0.78, 0.92))
                 lr = lead.box.x + lead.box.w
-                self._text(img, (lr, ly - 6 * ck), txt, "sans_bold",
-                           max(11, int(17 * ck)), col, "ra", 1.0, 0.01 * 17 * ck)
-            self._text(img, (lead.box.x + lead.box.w, ly + 12 * ck),
+                self._text(img, (lr, ly + 2 * ck), txt, "sans_bold",
+                           max(11, int(16 * ck)), col, "ra", 1.0, 0.01 * 16 * ck)
+            self._text(img, (lr, ly + 18 * ck),
                        ("黑领先" if lv is not None and lv > 0 else ("白领先" if lv is not None else ""))
                        if self.lang == "zh" else "",
                        "sans", max(7, int(8.5 * ck)), self.th.faint, "ra", 0.9)
@@ -906,8 +949,10 @@ class Renderer:
         cd.rounded_rectangle([0, 0, w, h], radius=max(2, int(4 * ck)), fill=card_col)
         img.paste(card, (int(x), int(y)), card)
 
-        q = min(1.0, h / 84.0)
-        colw = w / 4.0
+        q = min(1.0, h / 80.0)
+        pad_in = max(6, int(10 * ck))
+        usable = max(80, w - pad_in * 2)
+        colw = usable / 4.0
         # 胜率
         wr = self.series.wr_at(idx)
         lead = self.series.lead_at(idx)
@@ -922,28 +967,27 @@ class Renderer:
             ((self.series.engine or "—")[:10], "引擎" if self.lang == "zh" else "engine"),
         ]
         for i, (val, lab) in enumerate(items):
-            cx = x + colw * i
-            self._text(img, (cx, y + 8 * ck * q), val, "sans_bold",
-                       max(10, int(21 * ck * q)),
+            cx = x + pad_in + colw * i
+            self._text(img, (cx, y + 6 * ck * q), val, "sans_bold",
+                       max(10, int(18 * ck * q)),
                        th.text if i == 0 else th.dim, "la", 1.0, 0.0)
-            self._text(img, (cx, y + 33 * ck * q), lab, "sans",
-                       max(7, int(9 * ck * q)), th.faint, "la", 0.92, 0.06 * 9 * ck * q)
+            self._text(img, (cx, y + 28 * ck * q), lab, "sans",
+                       max(7, int(9 * ck * q)), th.dim, "la", 1.0, 0.05 * 9 * ck * q)
 
-        # 推荐点 (下一手, 胜率换算成黑方视角, 避免与面板 88.4% 黑胜率打架)
-        ry = y + h - 20 * ck * q
+        # 推荐点
+        ry = y + h - 14 * ck * q
         if an and an.best:
             to_play = None
             if idx < len(self.moves):
                 to_play = WHITE if self.moves[idx].color == BLACK else BLACK
-            label = "AI 推荐 · 下一手黑方胜率" if self.lang == "zh" else "AI picks (black wr)"
+            label = "AI 推荐 · 黑方胜率" if self.lang == "zh" else "AI picks (black wr)"
             self._text(img, (x, ry), label,
                        "sans", max(7, int(9 * ck)), th.faint, "la", 0.92, 0.04 * 9 * ck)
             bxx = x + w * 0.46
             for n_bm, bm in enumerate([b for b in an.best if b.valid][:2]):
                 if to_play is not None:
                     bwr = bm.winrate if to_play == 1 else 100.0 - bm.winrate
-                    side = ("黑" if to_play == 1 else "白") if self.lang == "zh" else ("B" if to_play == 1 else "W")
-                    s = f"{bm.coord} {side}{bwr:.0f}%"
+                    s = f"{bm.coord} {bwr:.0f}%"
                 else:
                     s = f"{bm.coord} {bm.winrate:.0f}%"
                 fs = max(9, int(12 * ck * max(q, 0.86)))
@@ -958,183 +1002,176 @@ class Renderer:
                        "sans", max(7, int(9 * ck)), th.faint, "la", 0.92, 0.04 * 9 * ck)
 
     def _panel_tall(self, img, t, idx, p, mv) -> None:
-        """横屏 / 方屏: 赛事-棋手-手数-分析图表-AI卡-最近手数-注释/资料."""
+        """横屏 / 方屏: 头部实测排布, 分析区用 _layout_analysis 的盒子."""
         L, th = self.L, self.th
-        x, y, w, h = L.panel_x, L.panel_y, L.panel_w, L.panel_h
-        k = h / 950.0
         info = self.rv.info
         has_an = self.show_analysis and self.charts.active
+        pad = getattr(self, "_pad", 14)
+        x = L.panel_x + pad
+        y = L.panel_y + pad
+        w = L.panel_w - pad * 2
+        k = self._analysis_k if has_an else L.panel_h / 950.0
 
-        # ---- 赛事 + 日期 ----
+        # ---- 赛事 + 日期 (同一行, 左右对齐) ----
         lab = self._event_label()
-        fs = max(10, int(17 * k))
-        fnt, fsz = gx.fit_font("sans", lab, w, fs, 9, 0.10)
-        self._text(img, (x, y + 2 * k), lab, "sans", fsz, th.dim, "la", 1.0, 0.10 * fsz)
+        fs = max(10, int(16 * k))
+        fnt, fsz = gx.fit_font("sans", lab, w * 0.72, fs, 9, 0.10)
+        self._text(img, (x, y), lab, "sans", fsz, th.dim, "la", 1.0, 0.10 * fsz)
         if info.date:
-            self._text(img, (x, y + max(26 * k, fsz * 1.62)), info.date, "sans",
-                       max(9, int(13 * k)), th.faint, "la", 0.95, 0.10 * 13 * k)
+            self._text(img, (x + w, y + 1 * k), info.date, "sans",
+                       max(9, int(12 * k)), th.faint, "ra", 0.95, 0.08 * 12 * k)
 
-        # ---- 棋手 (并排, 给图表腾出空间) ----
-        py = y + 62 * k
+        # ---- 棋手 (并排) ----
+        py = y + max(fsz * 1.55, 30 * k)
         colw = w * 0.5
         self._player_block(img, x, py, BLACK, info.black, info.black_rank,
-                           int(34 * k), k, max_w=colw - 6 * k)
-        self._player_block(img, x + colw + 2 * k, py, WHITE, info.white, info.white_rank,
-                           int(34 * k), k, max_w=colw - 10 * k)
+                           int(30 * k), k, max_w=colw - 8 * k)
+        self._player_block(img, x + colw + 4 * k, py, WHITE, info.white, info.white_rank,
+                           int(30 * k), k, max_w=colw - 12 * k)
 
         # ---- 分隔 ----
-        sepy = py + 58 * k
+        sepy = py + 56 * k
         self._hair(img, x, sepy, w, 1.0)
-        self._hair(img, x, sepy, 52 * k, 2, th.accent)
+        self._hair(img, x, sepy, 48 * k, 2, th.accent)
 
-        # ---- 手数 + 状态(同一行) ----
-        ly = sepy + 12 * k
+        # ---- 手数 + 状态 (同一行, 左右各留余量) ----
+        ly = sepy + 10 * k
         num = str(mv.number) if mv else "0"
         total = str(len(self.moves))
-        big = int(56 * k)
-        ny = ly + 1 * k
-        nw, nh = self._text(img, (x, ny), num, "serif_bold", big, th.text, "la", 1.0)
-        self._text(img, (x + nw + 9 * k, ny + nh - 16 * k), f"/ {total}", "sans",
-                   max(9, int(14 * k)), th.faint, "la", 0.95, 0)
+        big = int(48 * k)
+        nw, nh = self._text(img, (x, ly), num, "serif_bold", big, th.text, "la", 1.0)
+        self._text(img, (x + nw + 8 * k, ly + nh - 14 * k), f"/ {total}", "sans",
+                   max(9, int(13 * k)), th.faint, "la", 0.95, 0)
 
-        cap_y = ny + nh
         if mv is not None:
-            sx = x + max(nw + 58 * k, w * 0.34)
-            sy = ny + 9 * k
+            sx = x + w * 0.48
+            sy = ly + 6 * k
             dot = self._panel_stone(mv.color, int(7 * k))
-            img.paste(dot, (int(sx), int(sy + 3 * k)), dot.getchannel("A"))
+            img.paste(dot, (int(sx), int(sy + 2 * k)), dot.getchannel("A"))
             col_name = ("黑方落子" if mv.color == BLACK else "白方落子") if self.lang == "zh" \
                 else ("Black to play" if mv.color == BLACK else "White to play")
-            nw2, _ = self._text(img, (sx + dot.width + 8 * k, sy), col_name, "sans",
-                                max(9, int(15 * k)), th.dim, "la", 1.0, 0.02 * 15 * k)
+            self._text(img, (sx + dot.width + 8 * k, sy), col_name, "sans",
+                       max(9, int(14 * k)), th.dim, "la", 1.0, 0.02 * 14 * k)
             cb, cw = self._captures_upto(idx + 1)
-            self._text(img, (sx, sy + 26 * k),
+            self._text(img, (sx + dot.width + 8 * k, sy + 22 * k),
                        f"提子 {cb} : {cw}" if self.lang == "zh" else f"captures {cb} : {cw}",
                        "sans", max(8, int(12 * k)), th.dim, "la", 0.95, 0.02 * 12 * k)
-            cap_y = sy + 44 * k
 
-        # ---- 分析图表 + AI 卡 ----
         cmt_text = self._comment_text(idx, mv)
         has_cmt = bool(self.show_comment and cmt_text)
-        pby = y + h - 34 * k
+        pby = L.panel_y + L.panel_h - 16 * k
+
         if has_an:
             self._chart_block(img, idx, k)
             self._ai_card(img, idx, k)
-            assert self._card_box is not None
-            list_top = self._card_box[1] + self._card_box[3] + 30 * k
-            reserve = 232 * k
+            # 最近手数 (一行, 用布局预算)
+            list_h = getattr(self, "_list_h", 0.0)
+            list_top = getattr(self, "_list_top", 0.0)
+            if list_h > 20:
+                # 标题画在最近手数区域内部顶部, 不再上溢压 AI 卡
+                self._text(img, (x, list_top),
+                           ("最 近 手 数" if self.lang == "zh" else "R E C E N T   M O V E S"),
+                           "sans", max(8, int(10 * k)), th.faint, "la", 0.92, 1.6 * k)
+                self._recent_moves(img, x, list_top + 16 * k, w,
+                                   max(18 * k, list_h - 16 * k), k, idx, 3, 1)
+            c_top = getattr(self, "_comment_top", list_top + list_h + 8 * k)
+            c_h = max(48.0, getattr(self, "_comment_h", pby - c_top - 8 * k))
+            box = (x, c_top, w, c_h)
         else:
-            list_top = cap_y + 26 * k
-            reserve = (300 if has_cmt else 168) * k
+            box = (x, ly + nh + 18 * k, w, max(60.0, pby - (ly + nh + 18 * k)))
 
-        avail = max(0.0, pby - 16 * k - reserve - list_top)
-        per_col = int(avail / (40 * k)) if avail > 40 * k else 1
-        per_col = max(1, min(per_col, 4))
-        row_h = max(28 * k, min(50 * k, avail / per_col if avail > 0 else 28 * k))
-        rows = min(per_col * 2, idx + 1)
-
-        if idx >= 0:
-            self._text(img, (x, list_top - 20 * k),
-                       ("最 近 手 数" if self.lang == "zh" else "R E C E N T   M O V E S"),
-                       "sans", max(8, int(11 * k)), th.faint, "la", 0.95, 2.0 * k)
-            if rows >= 2:
-                self._recent_moves(img, x, list_top + 1 * k, w, row_h, k, idx, rows, per_col)
-
-        block_top = list_top + per_col * row_h + 24 * k
-        box_h = max(70 * k, pby - 26 * k - block_top)
-        box = (x, block_top, w, box_h)
         if has_cmt:
-            base = int(min(26 * k, max(18 * k, box_h / 7.6)))
+            base = int(min(24 * k, max(16 * k, box[3] / 6.8)))
             self._draw_comment(img, t, idx, mv, box, k, base=base, text=cmt_text)
         else:
             self._info_block(img, idx, box, k)
 
-        # 进度条压在面板底边
-        self._progress(img, x, pby, w, k, (idx + 1) / max(1, len(self.moves)))
+        self._progress(img, L.panel_x + pad, pby, w, k, (idx + 1) / max(1, len(self.moves)))
 
     def _panel_portrait(self, img, t, idx, p, mv) -> None:
-        """竖屏: 棋盘在上, 信息面板在下."""
+        """竖屏: 棋盘在上, 信息面板在下 (流式布局)."""
         L, th = self.L, self.th
-        x, y, w, h = L.panel_x, L.panel_y, L.panel_w, L.panel_h
-        k = h / 610.0
         info = self.rv.info
+        has_an = self.show_analysis and self.charts.active
+        pad = getattr(self, "_pad", 12)
+        x = L.panel_x + pad
+        y = L.panel_y + pad
+        w = L.panel_w - pad * 2
+        k = self._analysis_k if has_an else L.panel_h / 610.0
 
         # ---- 赛事 + 日期 ----
         lab = self._event_label()
-        fs = max(10, int(15 * k))
-        fnt, fsz = gx.fit_font("sans", lab, w * 0.7, fs, 9, 0.08)
+        fs = max(10, int(14 * k))
+        fnt, fsz = gx.fit_font("sans", lab, w * 0.70, fs, 9, 0.08)
         self._text(img, (x, y), lab, "sans", fsz, th.dim, "la", 1.0, 0.08 * fsz)
         if info.date:
-            self._text(img, (x + w, y + 1 * k), info.date, "sans", max(9, int(13 * k)),
-                       th.faint, "ra", 0.95, 0.08 * 13 * k)
+            self._text(img, (x + w, y + 1 * k), info.date, "sans", max(9, int(12 * k)),
+                       th.faint, "ra", 0.95, 0.08 * 12 * k)
 
-        # ---- 棋手 (左右并排) ----
-        py = y + 36 * k
+        # ---- 棋手 ----
+        py = y + max(fsz * 1.5, 26 * k)
         colw = w * 0.5
         self._player_block(img, x, py, BLACK, info.black, info.black_rank,
-                           int(34 * k), k, max_w=colw - 4 * k)
-        self._player_block(img, x + colw + 8 * k, py, WHITE, info.white,
-                           info.white_rank, int(34 * k), k, max_w=colw - 12 * k)
+                           int(28 * k), k, max_w=colw - 6 * k)
+        self._player_block(img, x + colw + 6 * k, py, WHITE, info.white,
+                           info.white_rank, int(28 * k), k, max_w=colw - 10 * k)
 
-        sepy = py + 66 * k
+        sepy = py + 52 * k
         self._hair(img, x, sepy, w, 1.0)
-        self._hair(img, x, sepy, 46 * k, 2, th.accent)
+        self._hair(img, x, sepy, 42 * k, 2, th.accent)
 
         # ---- 手数 + 状态 ----
-        ny = sepy + 22 * k
+        ny = sepy + 14 * k
         num = str(mv.number) if mv else "0"
         total = str(len(self.moves))
-        big = int(80 * k)
+        big = int(52 * k)
         nw, nh = self._text(img, (x, ny), num, "serif_bold", big, th.text, "la", 1.0)
-        self._text(img, (x + nw + 10 * k, ny + nh - 20 * k), f"/ {total}", "sans",
-                   max(9, int(16 * k)), th.faint, "la", 0.95, 0)
+        self._text(img, (x + nw + 8 * k, ny + nh - 12 * k), f"/ {total}", "sans",
+                   max(9, int(13 * k)), th.faint, "la", 0.95, 0)
 
         if mv is not None:
-            sx = x + max(nw + 76 * k, w * 0.34)
-            dot = self._panel_stone(mv.color, int(8 * k))
-            img.paste(dot, (int(sx), int(ny + 8 * k)), dot.getchannel("A"))
+            sx = x + w * 0.50
+            sy = ny + 2 * k
+            dot = self._panel_stone(mv.color, int(7 * k))
+            img.paste(dot, (int(sx), int(sy + 2 * k)), dot.getchannel("A"))
             col_name = ("黑方落子" if mv.color == BLACK else "白方落子") if self.lang == "zh" \
                 else ("Black" if mv.color == BLACK else "White")
-            self._text(img, (sx + dot.width + 9 * k, ny + 4 * k), col_name, "sans",
-                       max(9, int(17 * k)), th.dim, "la", 1.0, 0.02 * 17 * k)
+            self._text(img, (sx + dot.width + 8 * k, sy), col_name, "sans",
+                       max(9, int(14 * k)), th.dim, "la", 1.0, 0.02 * 14 * k)
             cb, cw = self._captures_upto(idx + 1)
-            self._text(img, (sx, ny + 38 * k),
+            self._text(img, (sx + dot.width + 8 * k, sy + 18 * k),
                        f"提子 {cb} : {cw}" if self.lang == "zh" else f"captures {cb} : {cw}",
-                       "sans", max(8, int(13 * k)), th.dim, "la", 0.95, 0.02 * 13 * k)
+                       "sans", max(8, int(11 * k)), th.dim, "la", 0.95, 0.02 * 11 * k)
 
-        # ---- 分析图表 + AI 卡 ----
-        has_an = self.show_analysis and self.charts.active
         cmt_text = self._comment_text(idx, mv)
         has_cmt = bool(self.show_comment and cmt_text)
-        pby = y + h - 26 * k
+        pby = L.panel_y + L.panel_h - 12 * k
+
         if has_an:
             self._chart_block(img, idx, k)
             self._ai_card(img, idx, k)
-            assert self._card_box is not None
-            list_top = self._card_box[1] + self._card_box[3] + 14 * k
-            per_col, row_h = 0, 0
+            c_top = getattr(self, "_comment_top", self._card_box[1] + self._card_box[3] + 8 * k)
+            c_h = max(36.0, getattr(self, "_comment_h", pby - c_top))
+            box = (x, c_top, w, c_h)
         else:
-            # ---- 最近手数 (双栏) ----
-            list_top = ny + nh + 22 * k
-            reserve = (150 if has_cmt else 96) * k
-            avail = max(0.0, pby - 14 * k - reserve - list_top)
-            per_col = int(avail / (30 * k)) if avail > 30 * k else 1
-            per_col = max(1, min(per_col, 5))
-            row_h = max(24 * k, min(40 * k, avail / per_col if avail > 0 else 24 * k))
+            list_top = ny + nh + 12 * k
+            reserve = (100 if has_cmt else 64) * k
+            avail = max(20.0, pby - reserve - list_top)
+            per_col = max(1, min(5, int(avail / (26 * k))))
+            row_h = max(20 * k, min(32 * k, avail / per_col if avail > 0 else 22 * k))
             rows = min(per_col * 2, idx + 1)
             if rows >= 2:
                 self._recent_moves(img, x, list_top, w, row_h, k, idx, rows, per_col)
+            box = (x, list_top + per_col * row_h + 8 * k, w,
+                   max(32.0, pby - (list_top + per_col * row_h + 8 * k)))
 
-        # ---- 底部 注释/资料 ----
-        btop = list_top + per_col * row_h + (10 * k if has_an else 12 * k)
-        box = (x, btop, w, max(40 * k, pby - 18 * k - btop))
         if has_cmt:
-            base = int(min(22 * k, max(15 * k, box[3] / 6.0)))
+            base = int(min(18 * k, max(13 * k, box[3] / 5.2)))
             self._draw_comment(img, t, idx, mv, box, k, base=base, text=cmt_text)
         else:
             self._info_block(img, idx, box, k)
 
-        self._progress(img, x, pby, w, k, (idx + 1) / max(1, len(self.moves)))
+        self._progress(img, L.panel_x + pad, pby, w, k, (idx + 1) / max(1, len(self.moves)))
 
 
     def _recent_moves(self, img, x, y, w, row_h, k, idx, rows,
@@ -1242,16 +1279,16 @@ class Renderer:
         past = [m for m in ser.key_moments if m.index <= idx]
         worst = min(past, key=lambda m: m.swing) if past else None
 
-        self._hair(img, x, y - 8 * k, 26 * k, 1.0, th.accent)
-        self._text(img, (x, y), ("A I   复 盘" if zh else "A I   R E V I E W"),
-                   "sans", max(8, int(10 * k)), th.faint, "la", 0.95, 2.2 * k)
+        self._hair(img, x, y - 6 * k, 26 * k, 1.0, th.accent)
+        self._text(img, (x, y), ("AI 复盘" if zh else "AI REVIEW"),
+                   "sans", max(8, int(10 * k)), th.faint, "la", 0.95, 1.2 * k)
 
-        # 大数字: 吻合度
-        by = y + (20 if compact else 26) * k
-        big = max(16, int((32 if compact else 40) * k))
+        # 大数字: 吻合度 (数字与标签同一基线)
+        by = y + (18 if compact else 24) * k
+        big = max(16, int((28 if compact else 34) * k))
         nw, nh = self._text(img, (x, by), f"{rate:.0f}%", "serif_bold", big,
                             th.accent, "la", 1.0)
-        self._text(img, (x + nw + 10 * k, by + nh - 15 * k),
+        self._text(img, (x + nw + 8 * k, by + nh - 12 * k),
                    ("AI 首选吻合度" if zh else "AI match rate"),
                    "sans", max(8, int(10.5 * k)), th.faint, "la", 0.95, 0.05 * 10.5 * k)
 

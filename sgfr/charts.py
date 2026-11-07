@@ -248,7 +248,7 @@ class CurveChart:
             return v if mode == "RGBA" else v[:3]
 
         d = ImageDraw.Draw(img)
-        d.line([(ax, top), (ax, bot)], fill=c(theme.text, 55), width=max(1, int(1 * k)))
+        d.line([(ax, top), (ax, bot)], fill=c(theme.text, 28), width=max(1, int(1 * k)))
         r = max(4.0, 5.2 * k)
         d.ellipse([ax - r * 2.2, ay - r * 2.2, ax + r * 2.2, ay + r * 2.2],
                   fill=c(theme.accent2, 55))
@@ -283,13 +283,20 @@ def lead_range(values: Sequence[Optional[float]]) -> Tuple[float, float, List[fl
 
 def build_chart_set(x: int, y: int, w: int, h: int, series: AnalysisSeries,
                     theme: Theme, k: float = 1.0, lang: str = "zh",
-                    show_visits: bool = True, horizontal: bool = False
+                    show_visits: bool = True, horizontal: bool = False,
+                    show_lead: bool = True
                     ) -> ChartSet:
-    """胜率 + 目差曲线. 默认上下叠放; 竖屏时左右并排."""
+    """胜率 + 目差曲线. 默认上下叠放; 竖屏时左右并排.
+
+    show_lead=False 时只用胜率图填满高度 (空间不够时不硬塞两张).
+    """
     if series.count == 0:
         return ChartSet()
     gap = int(12 * k)
-    if horizontal:
+    if not show_lead:
+        wr_box = ChartBox(x, y, w, h)
+        lead_box = None
+    elif horizontal:
         wr_w = int((w - gap) * 0.52)
         lead_w = w - gap - wr_w
         wr_box = ChartBox(x, y, wr_w, h)

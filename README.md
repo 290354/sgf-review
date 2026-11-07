@@ -25,6 +25,18 @@ python3 sgf_review.py game.sgf --size vertical --duration 45 -o shorts.mp4
 # 换个风格 + 控制时长 + 加水印
 python3 sgf_review.py game.sgf -t midnight --duration 90 --watermark "@我的频道" -o out.mp4
 
+# 片段导出 (剪辑素材): 第 80-120 手, 或 12.5-30.2 秒
+python3 sgf_review.py game.sgf --range 80-120 -o clip.mp4
+python3 sgf_review.py game.sgf --range 12.5-30.2 -o clip.mp4
+
+# 一揽子附属导出 (不渲染主视频)
+python3 sgf_review.py game.sgf --no-video \
+  --srt out.srt --json out.json --poster poster.png \
+  --theme-sheet themes.png --gif preview.gif --highlights key.mp4
+
+# HEVC 编码 (同画质体积约 -30%)
+python3 sgf_review.py game.sgf --codec hevc -o out.mp4
+
 # 只出一张四宫格预览图, 先看效果再渲染
 python3 sgf_review.py game.sgf --preview preview.png
 
@@ -40,7 +52,7 @@ python3 sgf_review.py collection.sgf --game 2 -o game2.mp4
 | 参数 | 说明 |
 |---|---|
 | `-o, --output` | 输出路径；多个输入时可省略（自动命名） |
-| `-t, --theme` | `classic` 榧木经典 / `midnight` 深夜对局 / `paper` 素纸禅意 / `ink` 水墨留白 |
+| `-t, --theme` | `classic` 榧木经典 / `midnight` 暗夜极光 / `paper` 素纸禅意 / `ink` 水墨留白 / `snow` 雪地青瓷 / `sakura` 绯樱夜宴 |
 | `-s, --size` | `1080p` `720p` `1440p` `4k` `vertical`(1080×1920) `square`(1080×1080)，也可写 `1920x1080` |
 | `--fps` | 帧率，默认 30 |
 | `--speed` | 整体节奏倍率，越大越快 |
@@ -59,7 +71,17 @@ python3 sgf_review.py collection.sgf --game 2 -o game2.mp4
 | `--no-ai-commentary` | 关闭根据胜率变化自动生成的点评字幕 |
 | `--line` | 有分支时取哪条主线：`longest` / `first` / `last` |
 | `--quality` | `low` / `medium` / `high` / `ultra` |
-| `--codec` | `h264` / `vp9` |
+| `--codec` | `h264` / `hevc` / `vp9` |
+| `--range` | 只渲染片段：`80-120`（手数）或 `12.5-30.2`（秒） |
+| `--gif` | 额外导出循环 GIF（`--gif-fps` `--gif-scale` 可调） |
+| `--srt` | 导出 SRT 字幕（可导入剪映/PR），人类评论优先，其次 AI 点评 |
+| `--json` | 导出 JSON 元数据（手数/分析/时间轴/关键手），供二次创作 |
+| `--poster` | 导出海报帧 PNG（`--poster-move N` 指定手数） |
+| `--theme-sheet` | 导出 6 主题对比图 |
+| `--highlights` | 另出关键手集锦短片（AI 失误/好手，顶部横幅标注） |
+| `--no-video` | 不渲染主视频，只做上述附属导出 |
+| `--intro` / `--outro` | 片头/片尾时长（秒） |
+| `--no-intro` / `--no-outro` | 去掉片头/片尾 |
 | `-j, --jobs` | 并行进程数，默认按容器 CPU 配额与内存自动决定 |
 | `--preview` | 输出 2×2 预览拼图 |
 | `--info` | 只打印解析结果 |
