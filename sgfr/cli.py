@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import math
 import os
 import shutil
 import sys
@@ -12,6 +13,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import audio as saudio
 from . import encoder as senc
+from . import export as sexp
 from .board import validate
 from .renderer import Renderer, describe_komi, describe_result
 from .sgf import parse_collection_reviews
@@ -55,6 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
   python sgf_review.py game.sgf --theme midnight --size vertical
   python sgf_review.py game.sgf --duration 90 --labels all -o out.mp4
   python sgf_review.py game.sgf --preview preview.png
+  python sgf_review.py game.sgf --gif preview.gif --srt out.srt --json out.json
+  python sgf_review.py game.sgf --no-video --poster poster.png --theme-sheet themes.png
+  python sgf_review.py game.sgf --highlights key.mp4 --no-video
 """)
     p.add_argument("inputs", nargs="*", help="SGF 文件 (可多个)")
     p.add_argument("-o", "--output", help="输出视频路径")
@@ -84,9 +89,29 @@ def build_parser() -> argparse.ArgumentParser:
                    help="变体主线选择策略")
     p.add_argument("--game", default="1", help="多局棋谱中选择第几局 (默认 1, all=全部)")
     p.add_argument("--quality", default="high", choices=["low", "medium", "high", "ultra"])
-    p.add_argument("--codec", default="h264", choices=["h264", "vp9"])
+    p.add_argument("--codec", default="h264", choices=["h264", "hevc", "vp9"])
     p.add_argument("-j", "--jobs", type=int, default=0, help="并行渲染进程数 (默认自动)")
     p.add_argument("--preview", default=None, help="只生成预览拼图 PNG, 不渲染视频")
+    p.add_argument("--range", default=None,
+                   help="只渲染指定片段: '80-120' (手数) 或 '12.5-30.2' (秒), 用于导出素材")
+    p.add_argument("--gif", default=None,
+                   help="额外导出循环 GIF (社交/IM 预览), 如 --gif out.gif")
+    p.add_argument("--gif-fps", type=float, default=10.0, help="GIF 帧率 (默认 10)")
+    p.add_argument("--gif-scale", type=float, default=0.40, help="GIF 缩放 (默认 0.4)")
+    p.add_argument("--srt", default=None, help="导出 SRT 字幕 (可导入剪映/PR)")
+    p.add_argument("--json", default=None, help="导出 JSON 元数据 (手数/分析/时间轴)")
+    p.add_argument("--poster", default=None, help="导出海报帧 PNG (默认中盘局面)")
+    p.add_argument("--poster-move", type=int, default=None, help="海报帧显示到第几手")
+    p.add_argument("--theme-sheet", default=None,
+                  help="导出多主题对比图 (同一局面), 如 --theme-sheet themes.png")
+    p.add_argument("--highlights", default=None,
+                   help="另出关键手集锦短片 (AI 失误/好手)")
+    p.add_argument("--no-video", action="store_true",
+                   help="不渲染主视频, 只做 GIF/SRT/JSON/海报/主题图/集锦")
+    p.add_argument("--intro", type=float, default=3.1, help="片头时长秒")
+    p.add_argument("--outro", type=float, default=3.4, help="片尾时长秒")
+    p.add_argument("--no-intro", action="store_true", help="不要片头")
+    p.add_argument("--no-outro", action="store_true", help="不要片尾")
     p.add_argument("--info", action="store_true", help="只打印棋谱信息")
     p.add_argument("--list-themes", action="store_true", help="列出所有主题")
     p.add_argument("--quiet", action="store_true")
@@ -94,6 +119,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 # --------------------------------------------------------------------------- #
+def math_ceil(x: float) -> int:
+    return int(math.ceil(x))
+
+
 def human_time(sec: float) -> str:
     sec = max(0, int(round(sec)))
     return f"{sec // 60}:{sec % 60:02d}"
@@ -189,6 +218,47 @@ def print_info(rv, path: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
+def _stem_of(path: str) -> str:
+    return os.path.splitext(path)[0]
+
+
+def _side_exports(rnd, rv, tl, args, video_path: str) -> None:
+    """主视频之外的一揽子导出 (GIF/SRT/JSON/海报/主题图/集锦)."""
+    stem = _stem_of(video_path)
+    if args.srt:
+        p = args.srt if str(args.srt).endswith(".srt") else stem + ".srt"
+        n = sexp.write_srt(rv, tl, p, args.lang,
+                           ai_commentary=not args.no_ai_commentary)
+        if not args.quiet:
+            print(f"SRT 字幕: {p}  ({n} 条)")
+    if args.json:
+        p = args.json if str(args.json).endswith(".json") else stem + ".json"
+        sexp.write_json(rv, tl, p)
+        if not args.quiet:
+            print(f"JSON 元数据: {p}")
+    if args.poster:
+        p = args.poster if str(args.poster).endswith(".png") else stem + "_poster.png"
+        sexp.render_poster(rnd, p, args.poster_move)
+        if not args.quiet:
+            print(f"海报帧: {p}")
+    if args.gif:
+        p = args.gif if str(args.gif).endswith(".gif") else stem + ".gif"
+        n = sexp.export_gif(rnd, p, fps=args.gif_fps, scale=args.gif_scale)
+        if not args.quiet:
+            print(f"GIF: {p}  ({n} 帧)")
+    if args.theme_sheet:
+        p = args.theme_sheet if str(args.theme_sheet).endswith(".png") else stem + "_themes.png"
+        sexp.render_theme_sheet(rnd, rv, tl, p)
+        if not args.quiet:
+            print(f"主题对比图: {p}")
+    if args.highlights:
+        p = args.highlights if str(args.highlights).endswith(".mp4") else stem + "_key.mp4"
+        n = sexp.render_highlights(rv, tl, rnd.th, rnd.W, rnd.H, rnd.fps, p,
+                                   lang=args.lang)
+        if not args.quiet:
+            print(f"关键手集锦: {p}  ({n} 手)")
+
+
 def run_one(args, path: str, out_path: Optional[str]) -> int:
     reviews = parse_collection_reviews(path, args.line)
     if not reviews:
@@ -220,7 +290,9 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
 
         theme = get_theme(args.theme)
         w, h = parse_size(args.size)
-        timing = Timing(total=args.duration, speed=args.speed)
+        timing = Timing(total=args.duration, speed=args.speed,
+                        intro=0.0 if args.no_intro else args.intro,
+                        outro=0.0 if args.no_outro else args.outro)
         tl = build_timeline(rv, timing)
 
         cfg = dict(
@@ -238,19 +310,54 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
             os.makedirs(os.path.dirname(os.path.abspath(args.preview)) or ".", exist_ok=True)
             make_preview(rnd, args.preview, cfg)
             print(f"预览图已生成: {args.preview}  ({tl.total:.1f}s, {rnd.n_frames} 帧)")
+            if args.json:
+                sexp.write_json(rv, tl, args.json)
+                print(f"JSON 已生成: {args.json}")
             return 0
+
+        # 纯导出模式: 不渲染主视频
+        only_side = any([args.gif, args.srt, args.json, args.poster,
+                         args.theme_sheet, args.highlights])
 
         target = out_path
         if target is None:
             stem = os.path.splitext(os.path.basename(path))[0]
             suffix = f"_g{gi + 1}" if len(rv_list) > 1 else ""
-            ext = ".webm" if args.codec == "vp9" else ".mp4"
+            ext = ".webm" if args.codec == "vp9" else (".mp4" if args.codec != "hevc" else ".mp4")
             os.makedirs("output", exist_ok=True)
             target = os.path.join("output", f"{stem}{suffix}_{args.theme}{ext}")
 
         os.makedirs(os.path.dirname(os.path.abspath(target)) or ".", exist_ok=True)
         t0 = time.time()
         nframes = rnd.n_frames
+        f0, f1 = 0, nframes
+
+        if getattr(args, "no_video", False):
+            _side_exports(rnd, rv, tl, args, target or "output/clip")
+            if not args.quiet:
+                print("已完成附属导出 (未渲染主视频)")
+            continue
+
+        if args.range:
+            a, b = (args.range.split("-", 1) + [""])[:2]
+            try:
+                if a.strip().endswith("手") or (a.strip().isdigit() and "秒" not in a and "." not in a):
+                    m0 = max(1, int(a.strip().rstrip("手")))
+                    m1 = max(m0, int(b.strip().rstrip("手"))) if b.strip() else m0
+                    f0 = max(0, int(rnd.tl.slots[min(m0 - 1, len(rnd.moves) - 1)].start * args.fps))
+                    e_idx = min(m1, len(rnd.moves)) - 1
+                    f1 = min(nframes, int(math_ceil((rnd.tl.slots[e_idx].end) * args.fps)))
+                else:
+                    s0 = float(a)
+                    s1 = float(b) if b.strip() else tl.total
+                    f0 = max(0, int(s0 * args.fps))
+                    f1 = min(nframes, int(math_ceil(s1 * args.fps)))
+            except Exception:
+                print(f"错误: --range 格式应为 '80-120' 或 '12.5-30.2', 收到 '{args.range}'", file=sys.stderr)
+                return 2
+            f1 = max(f0 + 1, min(f1, nframes))
+            if not args.quiet:
+                print(f"片段模式: 帧 {f0}-{f1} ({(f1 - f0) / args.fps:.1f}s)")
 
         work = tempfile.mkdtemp(prefix="sgfr_")
         try:
@@ -265,11 +372,14 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
             jobs = args.jobs
             if jobs <= 0:
                 jobs = _auto_jobs()
+            if args.range:
+                jobs = 1  # 片段模式不并行, 避免起点状态不一致
             jobs = max(1, min(jobs, max(1, nframes // 45)))
 
+            span = f1 - f0
             if not args.quiet:
-                print(f"\n渲染中: {nframes} 帧 · {w}x{h}@{args.fps} · "
-                      f"时长 {human_time(tl.total)} · {jobs} 进程")
+                print(f"\n渲染中: {span} 帧 · {w}x{h}@{args.fps} · "
+                      f"时长 {human_time(span / args.fps)} · {jobs} 进程")
                 print(f"       主题 {theme.label} / {rv.info.size_x}路 / "
                       f"{len(rv.moves)} 手")
 
@@ -279,14 +389,14 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
                                         args.codec, audio=wav if has_audio else None)
                 assert proc.stdin is not None
                 try:
-                    for i in range(nframes):
+                    for i in range(f0, f1):
                         proc.stdin.write(rnd.render_frame(i).tobytes())
-                        if not args.quiet and i % 30 == 0:
-                            _bar(i, nframes, t0)
+                        if not args.quiet and (i - f0) % 30 == 0:
+                            _bar(i - f0, span, t0)
                 finally:
                     senc.close_writer(proc)
                 if not args.quiet:
-                    _bar(nframes, nframes, t0)
+                    _bar(span, span, t0)
                 shutil.move(seg, target)
             else:
                 segs = _run_parallel(nframes, jobs, work, cfg, args.quiet, t0)
@@ -297,11 +407,14 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
                 else:
                     shutil.move(joined, target)
 
+            _side_exports(rnd, rv, tl, args, target)
+
             dt = time.time() - t0
             size_mb = os.path.getsize(target) / 1024 / 1024
             if not args.quiet:
                 print(f"\n完成: {target}")
-                print(f"      {human_time(tl.total)} · {size_mb:.1f} MB · 耗时 {dt:.1f}s")
+                dur = (f1 - f0) / args.fps if args.range else tl.total
+                print(f"      {human_time(dur)} · {size_mb:.1f} MB · 耗时 {dt:.1f}s")
             outs.append(target)
         finally:
             shutil.rmtree(work, ignore_errors=True)

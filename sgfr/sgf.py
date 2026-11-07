@@ -361,6 +361,75 @@ def parse_point(txt: str, size_x: int, size_y: int) -> Optional[Tuple[int, int]]
     return None
 
 
+def parse_point_list(vals, size_x: int, size_y: int) -> List[Tuple[int, int]]:
+    """解析点列表, 支持 SGF 压缩矩形写法 AB[aa:cc]."""
+    pts: List[Tuple[int, int]] = []
+    for v in vals:
+        v = (v or "").strip()
+        if not v:
+            continue
+        if ":" in v:
+            a, b = v.split(":", 1)
+            p0 = parse_point(a, size_x, size_y)
+            p1 = parse_point(b, size_x, size_y)
+            if p0 and p1:
+                x0, y0 = p0
+                x1, y1 = p1
+                for y in range(min(y0, y1), max(y0, y1) + 1):
+                    for x in range(min(x0, x1), max(x0, x1) + 1):
+                        if (x, y) not in pts:
+                            pts.append((x, y))
+            continue
+        p = parse_point(v, size_x, size_y)
+        if p and p not in pts:
+            pts.append(p)
+    return pts
+
+
+def standard_handicap_stones(nx: int, ny: int, n: int) -> List[Tuple[int, int]]:
+    """标准让子星位 (日本/中国通用摆法).
+
+    很多真实棋谱只写 HA[4] 而不写 AB[], 渲染时棋盘会是空的.
+    这里按惯例补全: 2 子对角 / 3 子对角+天元 / 4 子四角 /
+    5 子四角+天元 / 6 子四角+左右边星 / 7 子再加天元 /
+    8 子四角+四边星 / 9 子再加天元.
+    """
+    if n < 2 or nx < 7 or ny < 7:
+        return []
+    e = 3 if (nx >= 13 and ny >= 13) else 2
+    mx, my = nx // 2, ny // 2
+    corners = [(e, e), (nx - 1 - e, ny - 1 - e),
+               (nx - 1 - e, e), (e, ny - 1 - e)]
+    # 去重 (小棋盘 e 可能与 mid 重合)
+    uniq: List[Tuple[int, int]] = []
+    for p in corners:
+        if p not in uniq:
+            uniq.append(p)
+    corners = uniq
+    if len(corners) < 4 and n >= 4:
+        return []
+    sides_lrtb = [(e, my), (nx - 1 - e, my), (mx, e), (mx, ny - 1 - e)]
+    sides = [p for p in sides_lrtb if p not in corners]
+    center = [(mx, my)] if (mx, my) not in corners else []
+
+    if n <= 3:
+        pts = [corners[0], corners[1]]  # 对角: 左上 + 右下
+        if n == 3:
+            pts.extend(center)
+        return pts[:n]
+    if n == 4:
+        return corners
+    if n == 5:
+        return corners + center
+    if n == 6:
+        return corners + sides[:2]
+    if n == 7:
+        return corners + sides[:2] + center
+    if n == 8:
+        return corners + sides[:4]
+    return corners + sides[:4] + center  # 9+
+
+
 def _parse_size(root: Node) -> Tuple[int, int]:
     sz = root.get("SZ", "19").strip()
     if ":" in sz:
@@ -495,21 +564,31 @@ def parse_sgf(path: str, line_strategy: str = "longest") -> Review:
     review = Review(info=info, branch_count=branches, source_encoding=enc,
                     source_path=os.path.abspath(path))
 
+    # 只写了 HA[] 却没给 AB[] 的让子谱: 按标准星位补全 (真实 KGS/野狐谱常见)
+    setup_b: List[Tuple[int, int]] = []
+    setup_w: List[Tuple[int, int]] = []
+    for node in line[:4]:
+        for p in parse_point_list(node.get_all("AB"), info.size_x, info.size_y):
+            if p not in setup_b:
+                setup_b.append(p)
+    if info.handicap >= 2 and not setup_b:
+        setup_b = standard_handicap_stones(info.size_x, info.size_y, info.handicap)
+        if setup_b:
+            review.warnings.append(
+                f"HA[{info.handicap}] 无 AB[], 已按标准星位摆 {len(setup_b)} 子")
+
     root_lz = root.get("LZ")
     if root_lz:
         review.initial_analysis = lz.parse_lz(root_lz, info.size_x, info.size_y)
 
-    setup_b: List[Tuple[int, int]] = []
-    setup_w: List[Tuple[int, int]] = []
     number = 0
     color_to_play = BLACK if info.handicap == 0 else WHITE
 
     for idx, node in enumerate(line):
         # ---- 初始布置 ------------------------------------------------------
         for key, bucket in (("AB", setup_b), ("AW", setup_w)):
-            for v in node.get_all(key):
-                p = parse_point(v, info.size_x, info.size_y)
-                if p and p not in bucket:
+            for p in parse_point_list(node.get_all(key), info.size_x, info.size_y):
+                if p not in bucket:
                     bucket.append(p)
 
         # ---- 节点标记 ------------------------------------------------------
@@ -522,10 +601,8 @@ def parse_sgf(path: str, line_strategy: str = "longest") -> Review:
                     if p:
                         marks.append(Mark("LB", p[0], p[1], label))
         for kind in ("TR", "SQ", "CR", "MA", "SL", "TB", "TW", "DD"):
-            for v in node.get_all(kind):
-                p = parse_point(v, info.size_x, info.size_y)
-                if p:
-                    marks.append(Mark(kind, p[0], p[1]))
+            for p in parse_point_list(node.get_all(kind), info.size_x, info.size_y):
+                marks.append(Mark(kind, p[0], p[1]))
 
         # ---- 着手 ----------------------------------------------------------
         mv = None
@@ -623,15 +700,26 @@ def parse_collection_reviews(path: str, line_strategy: str = "longest") -> List[
 
         rv = Review(info=info, branch_count=branches, source_encoding=enc,
                     source_path=os.path.abspath(path))
+        # HA 无 AB 补星位 (与 parse_sgf 一致)
+        has_ab = False
+        for node in line[:4]:
+            if node.has("AB"):
+                has_ab = True
+                break
+        if info.handicap >= 2 and not has_ab:
+            auto = standard_handicap_stones(info.size_x, info.size_y, info.handicap)
+            if auto:
+                rv.setup_black = auto
+                rv.warnings.append(
+                    f"HA[{info.handicap}] 无 AB[], 已按标准星位摆 {len(auto)} 子")
         root_lz = tree.get("LZ")
         if root_lz:
             rv.initial_analysis = lz.parse_lz(root_lz, info.size_x, info.size_y)
         number = 0
         for node in line:
             for key, bucket in (("AB", rv.setup_black), ("AW", rv.setup_white)):
-                for v in node.get_all(key):
-                    p = parse_point(v, info.size_x, info.size_y)
-                    if p and p not in bucket:
+                for p in parse_point_list(node.get_all(key), info.size_x, info.size_y):
+                    if p not in bucket:
                         bucket.append(p)
             marks: List[Mark] = []
             if node.has("LB"):
@@ -642,10 +730,8 @@ def parse_collection_reviews(path: str, line_strategy: str = "longest") -> List[
                         if p:
                             marks.append(Mark("LB", p[0], p[1], label))
             for kind in ("TR", "SQ", "CR", "MA", "SL", "TB", "TW", "DD"):
-                for v in node.get_all(kind):
-                    p = parse_point(v, info.size_x, info.size_y)
-                    if p:
-                        marks.append(Mark(kind, p[0], p[1]))
+                for p in parse_point_list(node.get_all(kind), info.size_x, info.size_y):
+                    marks.append(Mark(kind, p[0], p[1]))
             mv = None
             for key, col in (("B", BLACK), ("W", WHITE)):
                 if node.has(key):

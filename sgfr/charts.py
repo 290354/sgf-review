@@ -249,12 +249,12 @@ class CurveChart:
 
         d = ImageDraw.Draw(img)
         d.line([(ax, top), (ax, bot)], fill=c(theme.text, 55), width=max(1, int(1 * k)))
-        r = max(3.0, 4.0 * k)
-        d.ellipse([ax - r * 2, ay - r * 2, ax + r * 2, ay + r * 2],
-                  fill=c(theme.accent2, 45))
+        r = max(4.0, 5.2 * k)
+        d.ellipse([ax - r * 2.2, ay - r * 2.2, ax + r * 2.2, ay + r * 2.2],
+                  fill=c(theme.accent2, 55))
         d.ellipse([ax - r, ay - r, ax + r, ay + r],
-                  fill=c(theme.accent2, 255), outline=c(theme.bg.bottom, 220),
-                  width=max(1, int(1.2 * k)))
+                  fill=c(theme.accent2, 255), outline=c(theme.bg.bottom, 230),
+                  width=max(1, int(1.4 * k)))
 
 
 # --------------------------------------------------------------------------- #

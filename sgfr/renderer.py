@@ -216,6 +216,8 @@ class Renderer:
         self.cursor = 0
         self._sprite_cache: Dict[tuple, Image.Image] = {}
         self._label_sprites: Dict[tuple, Image.Image] = {}
+        self._ghosts: List[Tuple[float, float, int, float]] = []  # (x, y, color, born_t)
+        self._last_sync_t = -1.0
 
         self._precompute_marks()
         self.reset_canvas()   # 让子 / 摆子局: 初始化时就要有设置棋子
@@ -241,14 +243,17 @@ class Renderer:
             k = L.panel_h / 610.0
             top = L.panel_y + 240 * k
             ch = 152 * k
-            self._chart_box = (L.panel_x, top, L.panel_w, ch)
-            self._card_box = (L.panel_x, top + ch + 9 * k, L.panel_w, 56 * k)
+            self._chart_box = (L.panel_x, top, max(80, L.panel_w - 8), ch)
+            self._card_box = (L.panel_x, top + ch + 9 * k,
+                              max(80, L.panel_w - 8), 56 * k)
         else:
             k = L.panel_h / 950.0
-            top = L.panel_y + 236 * k
-            ch = 268 * k
-            self._chart_box = (L.panel_x, top, L.panel_w, ch)
-            self._card_box = (L.panel_x, top + ch + 11 * k, L.panel_w, 84 * k)
+            top = L.panel_y + 226 * k
+            ch = 280 * k
+            # 右侧留 18px 安全边距, 避免 88.4% 这类数值贴边
+            self._chart_box = (L.panel_x, top, max(80, L.panel_w - 18), ch)
+            self._card_box = (L.panel_x, top + ch + 14 * k,
+                              max(80, L.panel_w - 18), 88 * k)
         self._analysis_k = k
 
     def _build_board_shadow(self) -> None:
@@ -351,6 +356,8 @@ class Renderer:
         for x, y in self.rv.setup_white:
             self.canvas.place(x, y, WHITE)
         self.cursor = 0
+        self._ghosts = []
+        self._last_sync_t = -1.0
 
     def seek(self, idx: int) -> None:
         """直接把棋盘设为"走完 idx 手"的局面 (并行分段渲染起点用)."""
@@ -364,18 +371,27 @@ class Renderer:
                     stones[(x, y)] = b.grid[y][x]
         self.canvas.set_position(stones)
         self.cursor = idx
+        self._ghosts = []
+        self._last_sync_t = -1.0
 
     def _sync(self, target: int) -> None:
         """把 canvas 推进/回退到"已走完 target 手"的局面."""
         target = max(0, min(target, len(self.moves)))
         if target < self.cursor:
             self.reset_canvas()
+        # 只在逐手推进时给提子加淡出, 追赶多手时不产生历史残影
+        single = (target - self.cursor) == 1
         while self.cursor < target:
             mv = self.moves[self.cursor]
             if not mv.is_pass and getattr(mv, "valid", True):
                 self.canvas.place(mv.x, mv.y, mv.color)
                 if mv.captured:
                     self.canvas.remove_many(mv.captured)
+                    if single and self._last_sync_t >= 0:
+                        ghost_c = WHITE if mv.color == BLACK else BLACK
+                        for (gx, gy) in mv.captured:
+                            self._ghosts.append((float(gx), float(gy),
+                                                 ghost_c, self._last_sync_t))
             self.cursor += 1
 
     # ------------------------------------------------------------------ #
@@ -400,6 +416,34 @@ class Renderer:
     # ------------------------------------------------------------------ #
     # 公共绘制
     # ------------------------------------------------------------------ #
+    def _draw_captured_ghosts(self, img: Image.Image, t: float) -> None:
+        """被提棋子的淡出残影: 缩小 + 变透明, 与提子音效同步."""
+        CAP_DUR = 0.34
+        alive: List[Tuple[float, float, int, float]] = []
+        L = self.L
+        for (gx, gy, gcol, born) in self._ghosts:
+            age = t - born
+            if age < 0:
+                alive.append((gx, gy, gcol, born))
+                continue
+            if age >= CAP_DUR:
+                continue
+            alive.append((gx, gy, gcol, born))
+            e = 1.0 - age / CAP_DUR          # 1 -> 0
+            a = e * e
+            scale = 0.55 + 0.45 * e
+            radius = self.canvas.stone_r * scale
+            sprite = self._stone_layer(radius, gcol)
+            s = sprite
+            if a < 0.995:
+                s = sprite.copy()
+                s.putalpha(s.getchannel("A").point(lambda v: int(v * a)))
+            cx, cy = self.canvas.center(int(gx), int(gy))
+            img.paste(s, (int(L.board_x + cx - s.width / 2),
+                          int(L.board_y + cy - s.height / 2)),
+                      s.getchannel("A"))
+        self._ghosts = alive
+
     def _draw_board(self, img: Image.Image, board_img: Image.Image,
                     alpha: float = 1.0, scale: float = 1.0) -> None:
         L = self.L
@@ -433,9 +477,15 @@ class Renderer:
         # ---- 棋盘 (动画中的那一手不进 canvas, 单独画; 动画结束则落定) ----
         settled = idx if (mv is not None and not mv.is_pass and anim_p < 1.0
                           and getattr(mv, "valid", True)) else idx + 1
+        # 时间推进: _sync 内部用这个时间戳给提子淡出记生点
+        self._last_sync_t = t
         self._sync(settled)
         board_img = self.canvas.compose()
         self._draw_board(img, board_img)
+
+        # ---- 提子淡出 (被提棋子缩小 + 变透明) ----
+        if self._ghosts:
+            self._draw_captured_ghosts(img, t)
 
         if mv is not None and not mv.is_pass and anim_p < 1.0 and getattr(mv, "valid", True):
             bounce = 1.0 - ease_out_cubic(anim_p)
@@ -469,6 +519,16 @@ class Renderer:
 
         # ---- 手数编号 / 最后手高亮 / SGF 标记 ----
         self._draw_markers(img, idx, t)
+
+        # ---- 虚手提示 ----
+        if mv is not None and mv.is_pass and slot is not None:
+            a = clamp01((t - slot.start) / 0.25) * clamp01((slot.end - t) / 0.25 + 0.35)
+            if a > 0.02:
+                cx, cy = L.board_x + L.board_size / 2, L.board_y + L.board_size * 0.46
+                txt = "虚  手" if self.lang == "zh" else "PASS"
+                fs = int(28 * self.unit)
+                self._text(img, (cx, cy), txt, "serif_bold", fs,
+                           self.th.text, "mm", a * 0.85, 0.18 * fs)
 
         # ---- AI 推荐点(下一手) ----
         if self.show_analysis:
@@ -611,7 +671,8 @@ class Renderer:
                 cx, cy = self.canvas.center(m.x, m.y)
                 txt = str(m.number)
                 fsize = max(9, int(r * (0.96 if len(txt) == 1 else 0.78)))
-                col = (0.98, 0.96, 0.91) if m.color == BLACK else (0.14, 0.11, 0.07)
+                col = (0.98, 0.96, 0.91) if m.color == BLACK else (0.10, 0.08, 0.05)
+                # 白棋编号加深色描边, 浅色主题/亮背景上也看得清
                 self._text(img, (L.board_x + cx, L.board_y + cy + r * 0.03),
                            txt, "sans_bold", fsize, col, "mm", a)
 
@@ -788,9 +849,10 @@ class Renderer:
         self._text(img, (bx, by - 2 * ck), wr.label, "sans", max(8, int(10.5 * ck)),
                    self.th.faint, "la", 0.95, 0.08 * 10.5 * ck)
         if cur is not None:
+            wr.draw_cursor(img, idx, cur, self.th, ck)
             txt = f"{cur:.1f}%"
             col = self.th.accent2 if self.th.dark else mix(self.th.accent2, (0.1, 0.1, 0.1), 0.35)
-            self._text(img, (wr_r, by - 6 * ck), txt, "sans_bold", max(11, int(19 * ck)),
+            self._text(img, (wr_r, by - 8 * ck), txt, "sans_bold", max(13, int(24 * ck)),
                        col, "ra", 1.0, 0.01 * 19 * ck)
         elif idx >= 0:
             self._text(img, (wr_r, by - 3 * ck),
@@ -867,19 +929,28 @@ class Renderer:
             self._text(img, (cx, y + 33 * ck * q), lab, "sans",
                        max(7, int(9 * ck * q)), th.faint, "la", 0.92, 0.06 * 9 * ck * q)
 
-        # 推荐点
+        # 推荐点 (下一手, 胜率换算成黑方视角, 避免与面板 88.4% 黑胜率打架)
         ry = y + h - 20 * ck * q
         if an and an.best:
-            self._text(img, (x, ry), "AI 推荐" if self.lang == "zh" else "AI picks",
-                       "sans", max(7, int(9 * ck)), th.faint, "la", 0.92, 0.05 * 9 * ck)
-            bxx = x + w * 0.13
+            to_play = None
+            if idx < len(self.moves):
+                to_play = WHITE if self.moves[idx].color == BLACK else BLACK
+            label = "AI 推荐 · 下一手黑方胜率" if self.lang == "zh" else "AI picks (black wr)"
+            self._text(img, (x, ry), label,
+                       "sans", max(7, int(9 * ck)), th.faint, "la", 0.92, 0.04 * 9 * ck)
+            bxx = x + w * 0.46
             for n_bm, bm in enumerate([b for b in an.best if b.valid][:2]):
-                s = f"{bm.coord} {bm.winrate:.0f}%"
+                if to_play is not None:
+                    bwr = bm.winrate if to_play == 1 else 100.0 - bm.winrate
+                    side = ("黑" if to_play == 1 else "白") if self.lang == "zh" else ("B" if to_play == 1 else "W")
+                    s = f"{bm.coord} {side}{bwr:.0f}%"
+                else:
+                    s = f"{bm.coord} {bm.winrate:.0f}%"
                 fs = max(9, int(12 * ck * max(q, 0.86)))
-                fnt, fs = gx.fit_font("sans", s, w * 0.32, fs, 8, 0.0)
+                fnt, fs = gx.fit_font("sans", s, w * 0.26, fs, 8, 0.0)
                 nw, _ = self._text(img, (bxx, ry - 1 * ck), s, "sans", fs,
                                    th.accent if n_bm == 0 else th.dim, "la", 0.98, 0.02)
-                bxx += nw + 14 * ck
+                bxx += nw + 18 * ck
         else:
             eng = self.series.engine or "AI"
             self._text(img, (x, ry), f"{eng} · " + ("本手无分析数据" if self.lang == "zh"
@@ -1623,17 +1694,22 @@ class Renderer:
         ti = self.tl.intro_end
         to = self.tl.outro_start
         f = 0.55
+        has_intro = self.tl.timing.intro > 0.05
+        has_outro = self.tl.timing.outro > 0.05
         # 片头 → 正片: 先淡回背景, 再淡入棋盘, 避免文字压在棋盘上
-        if t < ti - f:
-            return self._intro_scene(t)
-        if t < ti:
-            k = ease_in_out(clamp01((t - (ti - f)) / f))
-            return Image.blend(self._intro_scene(t), self.bg, k)
-        if t < ti + f:
-            k = ease_in_out(clamp01((t - ti) / f))
-            return Image.blend(self.bg, self._board(t), k)
+        if has_intro:
+            if t < ti - f:
+                return self._intro_scene(t)
+            if t < ti:
+                k = ease_in_out(clamp01((t - (ti - f)) / f))
+                return Image.blend(self._intro_scene(t), self.bg, k)
+            if t < ti + f:
+                k = ease_in_out(clamp01((t - ti) / f))
+                return Image.blend(self.bg, self._board(t), k)
 
         # 正片 → 片尾: 同样先淡回背景
+        if not has_outro:
+            return self._board(t)
         if t < to - f:
             return self._board(t)
         if t < to:

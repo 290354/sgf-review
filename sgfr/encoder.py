@@ -8,10 +8,10 @@ import tempfile
 from typing import List, Optional, Sequence
 
 QUALITY = {
-    "low": {"h264": "3M", "vp9": "28"},
-    "medium": {"h264": "6M", "vp9": "24"},
-    "high": {"h264": "11M", "vp9": "19"},
-    "ultra": {"h264": "18M", "vp9": "14"},
+    "low": {"h264": "3M", "hevc": "3M", "vp9": "28"},
+    "medium": {"h264": "6M", "hevc": "5M", "vp9": "24"},
+    "high": {"h264": "11M", "hevc": "8M", "vp9": "19"},
+    "ultra": {"h264": "18M", "hevc": "13M", "vp9": "14"},
 }
 
 
@@ -38,11 +38,16 @@ def _pick_codec(kind: str):
     if kind == "vp9" and has_encoder("libvpx-vp9"):
         return ["-c:v", "libvpx-vp9", "-row-mt", "1", "-tile-columns", "2",
                 "-frame-parallel", "1", "-auto-alt-ref", "1"]
+    if kind == "hevc" and has_encoder("libx265"):
+        return ["-c:v", "libx265", "-preset", "medium", "-tag:v", "hvc1"]
     if kind == "h264":
         if has_encoder("libx264"):
             return ["-c:v", "libx264", "-preset", "slow", "-profile:v", "high"]
         if has_encoder("libopenh264"):
             return ["-c:v", "libopenh264"]
+    if kind == "hevc":
+        # 没有 libx265 就回退 h264
+        return _pick_codec("h264")
     return ["-c:v", "libvpx-vp9"]
 
 
@@ -59,6 +64,8 @@ def open_writer(path: str, w: int, h: int, fps: int, quality: str = "high",
     cmd += cargs
     if codec == "vp9" or "libvpx-vp9" in cargs:
         cmd += ["-crf", q["vp9"], "-b:v", "0", "-pix_fmt", "yuv420p", "-g", str(fps * 2)]
+    elif "libx265" in cargs or codec == "hevc":
+        cmd += ["-b:v", q.get("hevc", q["h264"]), "-pix_fmt", "yuv420p", "-g", str(fps * 2)]
     else:
         cmd += ["-b:v", q["h264"], "-pix_fmt", "yuv420p", "-g", str(fps * 2)]
         if "libopenh264" in cargs:

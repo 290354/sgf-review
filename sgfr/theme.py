@@ -175,6 +175,46 @@ _add(Theme(
     card=hx("#000000"), card_alpha=6, hair=hx("#3A3730"), hair_alpha=26,
 ))
 
+_add(Theme(
+    key="snow", label="雪地青瓷", dark=False,
+    bg=Backdrop(top=hx("#DCE4EA"), bottom=hx("#C4CED6"), glow=hx("#FFFFFF"),
+                glow_strength=0.32, glow_x=0.32, glow_y=0.14, vignette=0.30,
+                noise=0.016, paper=0.18),
+    brd=BoardStyle(wood=False, base=hx("#7FA0A8"), grain_dark=hx("#5F848C"),
+                   grain_light=hx("#A8C4C8"), grain_strength=0.28,
+                   line=hx("#0E242C"), line_alpha=240, star=hx("#081C24"),
+                   coord=hx("#E8F4F4"), border=hx("#4A6A74")),
+    black=StoneStyle(base=hx("#0E161E"), ambient=0.04, diffuse=0.52, spec=0.88,
+                     spec_power=120, spec2=0.10, rim=0.30, rim_color=hx("#6AB0C0"),
+                     sheen=0.05, sheen_color=hx("#D8ECF4")),
+    white=StoneStyle(base=hx("#F4F8F8"), ambient=0.78, diffuse=0.24, spec=0.48,
+                     spec_power=30, spec2=0.14, rim=0.18, rim_color=hx("#C8D8D8"),
+                     sheen=0.10, sheen_color=hx("#B0C8C8"), grain=0.02),
+    text=hx("#0E1C24"), dim=hx("#243E48"), faint=hx("#3E5864"),
+    accent=hx("#0E5A6C"), accent2=hx("#1A4A6C"),
+    card=hx("#000000"), card_alpha=12, hair=hx("#122A34"), hair_alpha=40,
+))
+
+_add(Theme(
+    key="sakura", label="绯樱夜宴", dark=True,
+    bg=Backdrop(top=hx("#1E1218"), bottom=hx("#0E080C"), glow=hx("#C05A70"),
+                glow_strength=0.26, glow_x=0.72, glow_y=0.16, vignette=0.70,
+                noise=0.014, paper=0.0),
+    brd=BoardStyle(wood=True, base=hx("#D8C0B4"), grain_dark=hx("#A88878"),
+                   grain_light=hx("#F0E0D4"), grain_strength=0.38,
+                   line=hx("#3A1C14"), line_alpha=225, star=hx("#2A120C"),
+                   coord=hx("#6A483C"), border=hx("#7A5248")),
+    black=StoneStyle(base=hx("#181014"), ambient=0.03, diffuse=0.50, spec=0.86,
+                     spec_power=140, spec2=0.06, rim=0.30, rim_color=hx("#C87A8A"),
+                     sheen=0.04, sheen_color=hx("#F0C8D0")),
+    white=StoneStyle(base=hx("#F6EEEA"), ambient=0.82, diffuse=0.22, spec=0.42,
+                     spec_power=26, spec2=0.10, rim=0.20, rim_color=hx("#D8A8B0"),
+                     sheen=0.10, sheen_color=hx("#E8C8C0"), grain=0.02),
+    text=hx("#F4E6E2"), dim=hx("#C0A098"), faint=hx("#907068"),
+    accent=hx("#D06878"), accent2=hx("#E8A8B0"),
+    card=hx("#FFFFFF"), card_alpha=10, hair=hx("#D8A8B0"), hair_alpha=26,
+))
+
 
 def get_theme(name: str) -> Theme:
     key = (name or "classic").lower()
