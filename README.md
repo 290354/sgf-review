@@ -8,13 +8,25 @@ python3 sgf_review.py 棋谱.sgf -o 回顾.mp4
 
 > 20 秒看懂效果：`output/01_alphago_vs_leesedol.mp4`（AlphaGo vs 李世石第四局，带职业解说）
 
+## v2.0.0 更新
+
+- **领地热力图重做**：修正半格偏移、离散硬边圆点、暗色主题下看不清、切手硬跳变、色块盖棋子等问题，改为连续领地场 + 主题自适应冷暖色 + 淡入/crossfade 流动动画 + 配色图例，并做了栅格化与缓存优化。
+- **实用工作流**：5 套一键预设、JSON 配置、`--dry-run` 试运行、`--benchmark` 性能基准、章节时间戳导出、低占用模式 `--eco`、断点续跑 `--skip-existing`。
+- **图形界面**：`python3 sgf_gui.py`（或 Windows 版双击 exe），带分镜预览、参数摘要、实时日志与进度条。
+- **Windows 免安装绿色版**：[Releases](https://github.com/290354/sgf-review/releases) 下载 `sgf-review-win64.zip`，解压即用，无需 Python；包内已附带 `ffmpeg.exe`。
+
+详见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+
 ---
 
 ## 1. 快速开始
 
 ```bash
 # 依赖: Python 3.9+ / Pillow / NumPy / ffmpeg (含 libx264 或 libopenh264)
-pip3 install pillow numpy
+pip3 install -r requirements.txt
+
+# 图形界面 (推荐新手): 选棋谱 -> 预览画面 -> 开始渲染
+python3 sgf_gui.py
 
 # 基础用法
 python3 sgf_review.py game.sgf -o out.mp4
@@ -45,6 +57,26 @@ python3 sgf_review.py game.sgf --info
 
 # 合集文件里指定第几局
 python3 sgf_review.py collection.sgf --game 2 -o game2.mp4
+
+# --- v2.0 新增 ---
+# 一键预设: review / shorts / heat / fast / eco (--list-presets 查看明细)
+python3 sgf_review.py game.sgf --preset heat -o out.mp4
+python3 sgf_review.py game.sgf --preset eco -o out.mp4   # 低占用, 后台渲染不卡前台
+
+# 领地热力图 (需含 ownership 的分析棋谱), 浓度可调
+python3 sgf_review.py 分析过的.sgf --heatmap --heat-strength 0.9 -o heat.mp4
+
+# 先看计划 / 测性能 / 导出章节, 都不生成视频
+python3 sgf_review.py game.sgf --dry-run
+python3 sgf_review.py game.sgf --benchmark
+python3 sgf_review.py game.sgf --chapters chapters.txt --no-video
+
+# 配置复用: 保存本次生效参数, 之后一键套用 (命令行显式参数优先)
+python3 sgf_review.py game.sgf --preset heat --save-config my.json
+python3 sgf_review.py other.sgf --config my.json -o other.mp4
+
+# 批量任务中断后直接续跑 (输出已存在则跳过)
+python3 sgf_review.py records/ --skip-existing --preset eco
 ```
 
 ## 2. 参数
@@ -86,6 +118,41 @@ python3 sgf_review.py collection.sgf --game 2 -o game2.mp4
 | `--preview` | 输出 2×2 预览拼图 |
 | `--info` | 只打印解析结果 |
 | `--list-themes` | 列出主题 |
+| `--preset NAME` | 一键套用方案：`review` / `shorts` / `heat` / `fast` / `eco` |
+| `--list-presets` | 列出所有预设及明细 |
+| `--config JSON` / `--save-config JSON` | 读取 / 保存 JSON 配置（显式命令行 > 配置 > 预设 > 默认） |
+| `--heat-strength 0~1.5` | 领地热力图浓度，默认 1.0 |
+| `--no-heat-transition` / `--no-heat-legend` | 关闭流动过渡 / 关闭配色图例 |
+| `--dry-run` | 只打印渲染计划，不生成文件 |
+| `--benchmark` | 连续帧稳态基准：单帧耗时 / 整片预估 / 峰值内存 |
+| `--chapters TXT` | 导出 YouTube / B 站章节时间戳 |
+| `--eco` | 低占用模式：最多 2 进程、限制 BLAS 线程、关过渡动画 |
+| `--skip-existing` | 输出已存在时跳过，便于批量续跑 |
+| `--version` | 显示版本号 |
+
+## 2.1 图形界面与 Windows 绿色版
+
+```bash
+python3 sgf_gui.py          # macOS / Linux 图形界面 ( tkinter, 无需额外依赖 )
+```
+
+Windows 用户可直接从 [Releases](https://github.com/290354/sgf-review/releases) 下载 `sgf-review-win64.zip`，
+解压后双击 `sgf-review.exe`，**无需安装 Python**。压缩包内已附带 `ffmpeg.exe`，请保持它与 exe 同目录。
+
+界面提供：棋谱/输出选择、2×2 分镜预览、当前配置摘要、5 套预设、6 套主题、
+分辨率/帧率/时长/画质/编码、水印、热力图浓度、渲染开关、
+**棋谱信息 / 预览画面 / 试运行 / 性能基准 / 开始渲染 / 停止**、实时日志与进度条。
+渲染在独立子进程执行，界面始终流畅；默认开启低占用模式。
+
+同一个 exe 也保留完整命令行：
+
+```bat
+sgf-review.exe --cli game.sgf -o out.mp4 --preset heat
+sgf-review.exe --cli --list-presets
+```
+
+自行构建 Windows 版：装好 Python 3.11 后运行 `build_win.bat`；推送 `v*` tag 会由
+`.github/workflows/windows-exe.yml` 在 Windows runner 上自动构建并上传到 Release。
 
 ## 3. SGF 兼容性（实测）
 
@@ -163,7 +230,7 @@ Lizzie 的字段视角并不统一，直接画会得到反相的曲线：
 - **关键手**：曲线上的红点对应「失误 / 严重失误」，片尾汇总最大失误
 - **AI 卡片**：当前手胜率、目差、visits、引擎名 + 下一手推荐点（前 2）
 - **棋盘推荐点**：AI 对下一手的首选，青色圆环 + 中心点
-- **领地热力图**（`--heatmap`）：ownership 转成空点上的半透明色块（蓝=黑，米=白）
+- **领地热力图**（`--heatmap`）：v2.0 起把 ownership 双线性插值成**连续领地场**，冷暖配色随主题明暗自适应，作为棋盘 underlay 插在木纹与棋子之间；首次出现淡入、相邻分析手之间 crossfade 流动过渡，棋盘上方有配色图例。低分辨率栅格化 + 量化缓存，稳态帧开销很低。可用 `--heat-strength` 调浓度、`--no-heat-transition` / `--no-heat-legend` 关闭动画或图例（需含 `ownership` 的分析棋谱）
 - **AI 复盘**：没有解说的手，底部显示吻合度、已分析手数、平均损失、最大失误、引擎与平均 visits；统计只算已经下过的部分，最大失误标注执子方（如「第 218 手（白）」），不会提前剧透后面的手
 - **片头 / 片尾**：标注「AI 分析 · 引擎 · 手数」与「AI 吻合度 / 最大失误」
 
@@ -195,6 +262,7 @@ Lizzie 的字段视角并不统一，直接画会得到反相的曲线：
 - 提子：被提棋子淡出
 - 最后一手：金色呼吸圆环
 - 片头 / 片尾：元素逐个上浮淡入，与正片交叉溶解
+- 领地热力图（v2.0）：首次出现淡入 + 相邻分析手 crossfade，领地色块连续流动，无硬跳变；低占用模式下自动改为静态显示
 
 **信息面板**（横屏 / 竖屏两套布局）
 - 赛事 · 日期 · 双方姓名与段位
@@ -219,29 +287,52 @@ Lizzie 的字段视角并不统一，直接画会得到反相的曲线：
 
 并行策略：读取 cgroup 的 CPU 配额与内存上限自动定进程数；若进程被系统回收会**自动降级重试**（8 → 4 → 2 → 1），不会整条任务失败。
 
+用 `--benchmark` 可以在渲染前直接测出当前机器上本局的稳态吞吐（连续帧采样，含图层缓存命中）：
+
+```bash
+python3 sgf_review.py 分析过的.sgf --preset eco --benchmark
+# 稳态单帧 10.3 ms (97 帧/秒 单进程) · 整片预估 8s · 峰值内存 405 MB/进程
+```
+
+`--eco` 低占用模式把进程数收敛到 2、把 OMP / OpenBLAS / MKL 线程数限制为 1、关闭热力图逐帧过渡，
+适合后台长时间渲染而前台照常办公；图形界面默认开启该模式。
+
 ## 7. 目录结构
 
 ```
 sgf-review/
 ├── sgf_review.py          # 命令行入口
+├── sgf_gui.py             # 图形界面 / Windows exe 入口 (--cli 分派)
+├── requirements.txt       # 运行依赖
+├── sgf-review.spec        # PyInstaller 打包配置
+├── build_win.bat / .ps1   # Windows 一键构建
+├── RELEASE_NOTES.md       # 版本更新说明
 ├── sgfr/
 │   ├── sgf.py             # SGF 词法/语法解析、编码识别、变体树
 │   ├── board.py           # 棋盘规则：落子、提子、合法性
 │   ├── timeline.py        # 节奏编排：按注释长度/提子/虚手分配时长
-│   ├── theme.py           # 4 套主题（棋盘/棋子/背景/文字）
+│   ├── theme.py           # 6 套主题（棋盘/棋子/背景/文字）
 │   ├── graphics.py        # 木纹、棋子球面光照、背景、发光
-│   ├── boardview.py       # 棋盘纹理与棋子层合成
+│   ├── boardview.py       # 棋盘纹理与棋子层合成 (支持 underlay)
 │   ├── lz.py              # LizzieYzy 分析解析、视角归一、关键点/吻合度
 │   ├── charts.py          # 胜率/目差曲线图层（预渲染 + 裁剪）
-│   ├── renderer.py        # 场景、动画、面板、片头片尾
+│   ├── renderer.py        # 场景、动画、面板、片头片尾、领地热力图
 │   ├── audio.py           # 落子音效合成与混音
-│   ├── encoder.py         # ffmpeg 管道、分段、拼接、混流
-│   └── cli.py             # 参数与主流程
+│   ├── encoder.py         # ffmpeg 管道、分段、拼接、混流、ffmpeg 定位
+│   ├── cli.py             # 参数与主流程
+│   ├── presets.py         # 分辨率/预设/配置键常量（轻量, GUI 复用）
+│   ├── workflow.py        # 预设合并、试运行、性能基准、章节、资源上限
+│   └── gui.py             # tkinter 图形界面
+├── assets/                # exe 图标、Windows 使用说明
+│   └── icon.ico
+├── .github/workflows/
+│   └── windows-exe.yml    # 自动构建 Windows 绿色版并发布
 ├── examples/              # 各类形态的示例棋谱（让子/变体/合集/GBK/13路…）
 ├── records/               # 真实棋谱库（5637 局）
 │   ├── kgs/2019-04/       # KGS 7d+ 对局 1255 局
 │   └── pro/               # alphago / cho_chikun / go_seigen / shusaku
 ├── tools/fetch_records.py # 棋谱下载脚本
+├── tools/make_icon.py     # exe 图标生成
 └── output/                # 演示视频
 ```
 

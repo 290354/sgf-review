@@ -1,0 +1,91 @@
+name: 构建 Windows 绿色版
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 准备 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install "pyinstaller>=6,<7"
+
+      - name: 生成程序图标
+        run: python tools/make_icon.py
+
+      - name: 下载 ffmpeg (Windows 静态构建)
+        shell: pwsh
+        run: |
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ff -Force
+          $exe = Get-ChildItem -Path ff -Filter ffmpeg.exe -Recurse |
+                 Select-Object -First 1
+          if (-not $exe) { throw "ffmpeg.exe not found in archive" }
+          New-Item -ItemType Directory -Force -Path dist\bundle | Out-Null
+          Copy-Item $exe.FullName dist\bundle\ffmpeg.exe
+          & $exe.FullName -hide_banner -version | Select-Object -First 1
+
+      - name: PyInstaller 打包单文件 exe
+        run: pyinstaller --noconfirm --clean sgf-review.spec
+
+      - name: 冒烟自检 (CLI 通道 + ffmpeg)
+        shell: pwsh
+        run: |
+          & dist\sgf-review.exe --cli --version
+          & dist\sgf-review.exe --cli --list-presets
+          & dist\bundle\ffmpeg.exe -hide_banner -version | Select-Object -First 1
+          $size = (Get-Item dist\sgf-review.exe).Length / 1MB
+          Write-Host ("exe size: {0:N1} MB" -f $size)
+
+      - name: 组装绿色发布包
+        shell: pwsh
+        run: |
+          Copy-Item dist\sgf-review.exe dist\bundle\sgf-review.exe
+          Copy-Item README.md dist\bundle\README.md
+          Copy-Item RELEASE_NOTES.md dist\bundle\更新说明.md
+          Copy-Item assets\README_WIN.txt dist\bundle\使用说明.txt
+          Copy-Item -Recurse examples dist\bundle\examples
+          Compress-Archive -Path dist\bundle\* `
+                           -DestinationPath sgf-review-win64.zip -Force
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgf-review-win64
+          path: sgf-review-win64.zip
+          retention-days: 30
+
+      - name: 发布到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notlike "v*") { $tag = "v2.0.0" }
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "sgf-review $tag" `
+                                   --notes-file RELEASE_NOTES.md
+          }
+          gh release upload $tag sgf-review-win64.zip --clobber
+          gh release view $tag --json assets --jq '.assets[].name'

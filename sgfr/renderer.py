@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
@@ -182,6 +183,10 @@ class Renderer:
                  subtitle_scale: float = 1.0,
                  show_analysis: bool = True,
                  show_heatmap: bool = False,
+                 heatmap_strength: float = 1.0,
+                 heatmap_transition: bool = True,
+                 heatmap_legend: bool = True,
+                 eco: bool = False,
                  ai_commentary: bool = True):
         self.rv = review
         self.tl = timeline
@@ -198,11 +203,53 @@ class Renderer:
         self.show_analysis = bool(
             show_analysis and review.series is not None and review.series.count > 0
         )
-        self.show_heatmap = show_heatmap and self.show_analysis
         self.ai_commentary = ai_commentary
 
         self.L = Layout.compute(width, height)
         self.unit = min(width, height) / 1080.0
+
+        # --- 领地热力图状态 ---
+        self.eco = bool(eco)
+        self.heatmap_strength = max(0.0, min(1.5, float(heatmap_strength)))
+        self.heatmap_transition = bool(heatmap_transition) and not self.eco
+        self.heatmap_legend = bool(heatmap_legend)
+        self._heat_has_data = False
+        if self.series is not None:
+            self._heat_has_data = any(
+                an is not None and an.ownership for an in self.series.points)
+        self.show_heatmap = bool(show_heatmap and self.show_analysis
+                                 and self._heat_has_data)
+        # 领地场本身是柔和渐变的, 用固定低分辨率栅格化即可 (与输出分辨率解耦)
+        self._heat_k = 6 if self.eco else 10
+        self._heat_cache_max = 4 if self.eco else 8
+        # 过渡档数 (量化后缓存, 每帧不必重新栅格化); eco / 关闭动画时为 0
+        self._heat_q = 0 if (self.eco or not self.heatmap_transition) else 6
+        self._heat_layers: "OrderedDict[int, Image.Image]" = OrderedDict()
+        self._heat_blends: "OrderedDict[Tuple[int, int], Image.Image]" = OrderedDict()
+        self._heat_fields: Dict[int, Optional[np.ndarray]] = {}
+        self._heat_palette_cache: Optional[Tuple[RGB, RGB]] = None
+        self._heat_source: List[int] = []
+        self._heat_res = 0
+        self._heat_first_t = 0.0
+        if self.show_heatmap:
+            nx, ny = self.rv.info.size_x, self.rv.info.size_y
+            need = nx * ny
+            src, first = -1, -1
+            for i, an in enumerate(self.series.points):
+                ok = (an is not None and an.ownership
+                      and len(an.ownership) >= need)
+                if ok:
+                    src = i
+                    if first < 0:
+                        first = i
+                self._heat_source.append(src)
+            if first >= 0:
+                self._heat_first_t = (self.tl.slots[first].start
+                                      if first < len(self.tl.slots) else 0.0)
+            # 固定上限 240px: 柔和场在 4K 下也不需要更高精度, 避免栅格化
+            # 随输出分辨率暴涨 (1080p 下从 480px 降到 240px 可省一半时间)
+            self._heat_res = min(240, max(120, self.L.board_size // 4)) \
+                if self.eco else min(300, max(160, self.L.board_size // 3))
 
         self.bg = gx.backdrop(width, height, theme.bg, seed=41)
 
@@ -523,7 +570,26 @@ class Renderer:
         # 时间推进: _sync 内部用这个时间戳给提子淡出记生点
         self._last_sync_t = t
         self._sync(settled)
-        board_img = self.canvas.compose()
+        # 领地热力图作为「棋盘底纹」插在木纹与棋子之间:
+        # 色块不会盖住棋子/手数编号, 也不会被棋子边缘切断。
+        # 稳态帧下 underlay 是同一个缓存对象, 把「木纹+领地」的合成结果
+        # 也缓存起来, 每帧只需合成棋子层 (与不开热力图时开销相近)。
+        if self.show_heatmap:
+            underlay = self._heat_frame(idx, t)
+            if underlay is None:
+                board_img = self.canvas.compose()
+            else:
+                cached = getattr(self, "_heat_base_cache", None)
+                if cached is not None and cached[0] is underlay:
+                    base = cached[1]
+                else:
+                    comp = self.canvas.base.copy().convert("RGBA")
+                    comp.alpha_composite(underlay)
+                    base = comp.convert("RGB")
+                    self._heat_base_cache = (underlay, base)
+                board_img = self.canvas.compose(with_shadow_base=base)
+        else:
+            board_img = self.canvas.compose()
         self._draw_board(img, board_img)
 
         # ---- 提子淡出 (被提棋子缩小 + 变透明) ----
@@ -556,10 +622,6 @@ class Renderer:
                 self._ring(img, (L.board_x + cxi, L.board_y + cyi), r, a,
                            self.th.accent, 2)
 
-        # ---- AI 形势热力图(领地估计) ----
-        if self.show_heatmap:
-            self._draw_heatmap(img, idx)
-
         # ---- 手数编号 / 最后手高亮 / SGF 标记 ----
         self._draw_markers(img, idx, t)
 
@@ -580,6 +642,10 @@ class Renderer:
         # ---- 面板 ----
         self._draw_panel(img, t, idx, p, mv)
 
+        # ---- 领地热力图图例 ----
+        if self.show_heatmap and self.heatmap_legend:
+            self._draw_heat_legend(img)
+
         # ---- 水印 ----
         if self.watermark:
             self._text(img, (L.W - L.W * 0.024, L.H - L.H * 0.026), self.watermark,
@@ -588,54 +654,213 @@ class Renderer:
         return img
 
     # ------------------------------------------------------------------ #
-    def _heat_layer(self, idx: int) -> Optional[Image.Image]:
-        """把 ownership 变成一层柔和的领地色块(缓存)."""
-        if not hasattr(self, "_heat_cache"):
-            self._heat_cache: Dict[int, Optional[Image.Image]] = {}
-        if idx in self._heat_cache:
-            return self._heat_cache[idx]
-        an = self.series.at(idx) if self.series is not None else None
+    # 领地热力图
+    # ------------------------------------------------------------------ #
+    # ownership 是「每个交叉点」的离散估值(-1 白 ~ +1 黑)。旧实现直接给每个
+    # 空点画一个小圆, 结果是零散硬边点阵、贴图层又整体偏移半格、深蓝在暗色
+    # 主题上几乎隐形、切手时整片硬跳变。这里改成:
+    #   * 双线性插值为连续场 -> 成片的柔和领地, 而非离散圆点
+    #   * 冷暖双色随主题明暗自适应, 深浅主题下双方都清晰
+    #   * 相邻两手之间数值插值 + 首次出现淡入, 领地会「流动」
+    #   * 作为棋盘底纹(underlay)插在木纹与棋子之间, 色块不盖棋子/编号
+    #   * 低分辨率栅格化 + 量化缓存, 避免逐帧重算, 控制 CPU/内存
+    # ------------------------------------------------------------------ #
+    def _heat_palette(self) -> Tuple[RGB, RGB]:
+        """(黑方领地, 白方领地): 冷/暖对比, 随主题明暗自适应."""
+        if self._heat_palette_cache is None:
+            if self.th.dark:
+                cold = mix((0.26, 0.66, 1.00), self.th.accent2, 0.18)
+                warm = mix((1.00, 0.70, 0.28), self.th.accent, 0.10)
+            else:
+                cold = mix((0.12, 0.36, 0.72), self.th.accent2, 0.14)
+                warm = mix((0.86, 0.40, 0.14), self.th.accent, 0.10)
+            self._heat_palette_cache = (cold, warm)
+        return self._heat_palette_cache
+
+    def _heat_field(self, src: int) -> Optional[np.ndarray]:
+        """一手 ownership -> (ny, nx) 浮点场, 带缓存."""
+        if src in self._heat_fields:
+            return self._heat_fields[src]
+        an = self.series.at(src) if (src >= 0 and self.series is not None) else None
         if an is None or not an.ownership:
-            self._heat_cache[idx] = None
+            self._heat_fields[src] = None
             return None
         nx, ny = self.rv.info.size_x, self.rv.info.size_y
         if len(an.ownership) < nx * ny:
-            self._heat_cache[idx] = None
+            self._heat_fields[src] = None
             return None
+        arr = np.asarray(an.ownership[:nx * ny], dtype=np.float32).reshape(ny, nx)
+        self._heat_fields[src] = arr
+        return arr
+
+    @staticmethod
+    def _sample_grid(grid: np.ndarray, gx: np.ndarray,
+                     gy: np.ndarray) -> np.ndarray:
+        """双线性采样, 边界 clamp (让领地自然延伸到棋盘边缘)."""
+        ny, nx = grid.shape
+        xf = np.floor(gx)
+        yf = np.floor(gy)
+        x0 = np.clip(xf.astype(np.int32), 0, nx - 1)
+        y0 = np.clip(yf.astype(np.int32), 0, ny - 1)
+        x1 = np.clip(x0 + 1, 0, nx - 1)
+        y1 = np.clip(y0 + 1, 0, ny - 1)
+        fx = np.clip(gx - xf, 0, 1)[None, :]
+        fy = np.clip(gy - yf, 0, 1)[:, None]
+        a = grid[y0[:, None], x0[None, :]]
+        b = grid[y0[:, None], x1[None, :]]
+        c = grid[y1[:, None], x0[None, :]]
+        d = grid[y1[:, None], x1[None, :]]
+        return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+
+    def _rasterize_heat(self, field: np.ndarray) -> Image.Image:
+        """把 (ny,nx) 场渲染成 bs×bs 的柔和 RGBA 领地层."""
+        c_cold, c_warm = self._heat_palette()
+        nx, ny = self.rv.info.size_x, self.rv.info.size_y
         bs = self.canvas.size
         cell = self.canvas.cell
-        layer = Image.new("RGBA", (bs, bs), (0, 0, 0, 0))
-        d = ImageDraw.Draw(layer)
-        rr = max(2.0, cell * 0.30)
-        for y in range(ny):
-            for x in range(nx):
-                v = an.ownership[y * nx + x]
-                av = abs(v)
-                if av < 0.22:
-                    continue
-                if (x, y) in self.canvas.stones:
-                    continue
-                cx, cy = self.canvas.center(x, y)
-                a = int(min(1.0, (av - 0.10) * 1.5) * 70)
-                if a <= 4:
-                    continue
-                c = (52, 96, 148) if v > 0 else (255, 246, 224)
-                d.ellipse([cx - rr, cy - rr, cx + rr, cy + rr],
-                          fill=(c[0], c[1], c[2], a))
-        heat = layer
-        if len(self._heat_cache) > 24:
-            self._heat_cache.clear()
-        self._heat_cache[idx] = heat
-        return heat
+        res = max(24, min(self._heat_res, bs))
+        step = bs / float(res)
+        px = (np.arange(res, dtype=np.float32) + 0.5) * step
+        py = (np.arange(res, dtype=np.float32) + 0.5) * step
+        gx = (px - self.canvas.origin_x) / cell
+        gy = (py - self.canvas.origin_y) / cell
+        v = self._sample_grid(field, gx, gy).astype(np.float32)
 
-    def _draw_heatmap(self, img: Image.Image, idx: int) -> None:
-        heat = self._heat_layer(idx)
-        if heat is None:
+        # 颜色: 以 0 为中心软混合, 正负交界不出现硬边
+        w = np.clip((v + 0.22) / 0.44, 0.0, 1.0)
+        w = w * w * (3 - 2 * w)
+        w3 = w[..., None]
+        cold = np.asarray(c_cold, dtype=np.float32)[None, None, :]
+        warm = np.asarray(c_warm, dtype=np.float32)[None, None, :]
+        rgb = warm * (1 - w3) + cold * w3
+
+        # alpha: |ownership| 越大越实; 中间地带留白, 自然形成势力分界
+        av = np.abs(v)
+        s = np.clip((av - 0.10) / 0.70, 0.0, 1.0)
+        s = s * s * (3 - 2 * s)
+        peak = 0.78 if self.th.dark else 0.66
+        alpha = s * peak * self.heatmap_strength
+        # 棋盘边缘羽化, 不铺到坐标标注区; 外扩半格覆盖到棋盘边界
+        ex = np.clip(np.minimum(gx + 0.5, (nx - 0.5) - gx) / 0.55, 0, 1)[None, :]
+        ey = np.clip(np.minimum(gy + 0.5, (ny - 0.5) - gy) / 0.55, 0, 1)[:, None]
+        edge = np.minimum(ex, ey)
+        edge = edge * edge * (3 - 2 * edge)
+        alpha = np.clip(alpha * edge, 0, 1)
+
+        arr = np.empty((res, res, 4), dtype=np.uint8)
+        arr[..., :3] = np.clip(rgb * 255, 0, 255).astype(np.uint8)
+        arr[..., 3] = (alpha * 255).astype(np.uint8)
+        small = Image.fromarray(arr, "RGBA")
+        # 低分辨率柔化后放大: BILINEAR 已足够平滑且明显快于 BICUBIC
+        radius = max(0.6, res / max(nx, ny) * 0.16)
+        small = small.filter(ImageFilter.GaussianBlur(radius))
+        return small.resize((bs, bs), Image.BILINEAR)
+
+    def _heat_layer(self, src: int) -> Optional[Image.Image]:
+        """按数据手序缓存的静态领地层 (eco 模式直接用它)."""
+        if src in self._heat_layers:
+            self._heat_layers.move_to_end(src)
+            return self._heat_layers[src]
+        field = self._heat_field(src)
+        if field is None:
+            return None
+        layer = self._rasterize_heat(field)
+        self._heat_layers[src] = layer
+        while len(self._heat_layers) > self._heat_cache_max:
+            self._heat_layers.popitem(last=False)
+        return layer
+
+    def _heat_frame(self, idx: int, t: float) -> Optional[Image.Image]:
+        """当前帧领地层。
+
+        稳态(绝大多数帧)直接复用完整强度的静态层; 只在「AI 数据刚更新」
+        的那一手做短暂 crossfade, 让领地是流动变化而非硬跳变, 同时避免
+        整段视频的色块都被压淡。过渡结果按 (idx, 档位) 量化缓存。
+        """
+        if not self._heat_source:
+            return None
+        src = self._heat_source[min(idx, len(self._heat_source) - 1)]
+        if src < 0 or t < self._heat_first_t:
+            return None
+        cur = self._heat_layer(src)
+        if cur is None:
+            return None
+
+        Q = self._heat_q
+        prev_src = (self._heat_source[idx - 1]
+                    if 0 < idx <= len(self._heat_source) else -1)
+        # 首次出现: 用淡入系数把整层调淡 (q=0 表示还不显示)
+        appear = ease_in_out(clamp01((t - self._heat_first_t) / 0.9))
+        if Q > 0 and appear < 0.999:
+            key = ("in", int(round(appear * Q)))
+            q = key[1]
+            if q <= 0:
+                return None
+            if key in self._heat_blends:
+                return self._heat_blends[key]
+            faded = cur.copy()
+            faded.putalpha(cur.getchannel("A").point(
+                lambda v, f=q / float(Q): int(v * f)))
+            self._heat_blends[key] = faded
+            return faded
+
+        # 数据未更新 / 关闭动画: 直接完整显示
+        if Q <= 0 or prev_src == src or prev_src < 0:
+            return cur
+        slot = self.tl.slots[idx] if idx < len(self.tl.slots) else None
+        if slot is None:
+            return cur
+        span = min(0.55, max(0.18, slot.dur * 0.7))
+        k = ease_in_out(clamp01((t - slot.start) / span))
+        q = int(round(k * Q))
+        if q >= Q:
+            return cur
+        prev = self._heat_layer(prev_src)
+        if prev is None:
+            return cur
+        key = (idx, q)
+        if key in self._heat_blends:
+            self._heat_blends.move_to_end(key)
+            return self._heat_blends[key]
+        layer = Image.blend(prev, cur, q / float(Q))
+        self._heat_blends[key] = layer
+        while len(self._heat_blends) > self._heat_cache_max * 2:
+            self._heat_blends.popitem(last=False)
+        return layer
+
+    def _draw_heat_legend(self, img: Image.Image) -> None:
+        """棋盘上方迷你图例: 说明冷暖两色分别代表哪一方领地."""
+        L = self.L
+        if L.board_y < 26:            # 空间不足就让位给棋盘, 不硬塞
             return
-        cell = self.canvas.cell
-        ox = self.L.board_x + self.canvas.origin_x - cell / 2
-        oy = self.L.board_y + self.canvas.origin_y - cell / 2
-        img.paste(heat, (int(ox), int(oy)), heat)
+        bs = L.board_size
+        fs = max(10, int(bs * 0.020))
+        dot = max(6, int(fs * 0.72))
+        gap = int(fs * 0.55)
+        pad = int(fs * 0.62)
+        zh = self.lang == "zh"
+        lb = "黑方领地" if zh else "Black"
+        lw = "白方领地" if zh else "White"
+        c_cold, c_warm = self._heat_palette()
+        col = tuple(int(c * 255) for c in self.th.dim)
+        w = int(pad * 2 + dot * 2 + gap * 3 + fs * (len(lb) + len(lw)) * 0.92)
+        h = int(fs + pad * 1.1)
+        x0 = L.board_x
+        y0 = L.board_y - h - max(3, int(bs * 0.008))
+        d = ImageDraw.Draw(img, "RGBA")
+        d.rounded_rectangle([x0, y0, x0 + w, y0 + h], radius=h * 0.34,
+                            fill=(12, 16, 22, 118) if self.th.dark else (255, 253, 247, 150))
+        cy = y0 + h / 2
+        cx = x0 + pad
+        cc = tuple(int(c * 255) for c in c_cold)
+        cw = tuple(int(c * 255) for c in c_warm)
+        d.ellipse([cx, cy - dot / 2, cx + dot, cy + dot / 2], fill=cc + (215,))
+        cx += dot + gap * 0.6
+        self._text(img, (cx, cy), lb, "sans", fs, col, "lm", 0.92)
+        cx += fs * len(lb) * 0.92 + gap
+        d.ellipse([cx, cy - dot / 2, cx + dot, cy + dot / 2], fill=cw + (215,))
+        cx += dot + gap * 0.6
+        self._text(img, (cx, cy), lw, "sans", fs, col, "lm", 0.92)
 
     def _draw_ai_overlay(self, img: Image.Image, idx: int, t: float) -> None:
         """当前局面下 AI 对下一手的推荐选点."""

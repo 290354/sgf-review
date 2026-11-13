@@ -1,0 +1,7 @@
+# sgf-review 运行依赖 (Python 3.9+)
+# GUI 使用标准库 tkinter, Windows 官方 Python 自带, 无需额外安装
+Pillow>=9.0
+numpy>=1.21
+
+# 仅构建 Windows 绿色版 exe 时需要 (见 build_win.bat):
+#   pip install pyinstaller>=6.0

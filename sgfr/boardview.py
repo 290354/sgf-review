@@ -235,7 +235,17 @@ class BoardCanvas:
             self._blit(x, y, c)
 
     # ------------------------------------------------------------------ #
-    def compose(self, with_shadow_base: Optional[Image.Image] = None) -> Image.Image:
-        out = (with_shadow_base or self.base).copy()
-        out.paste(self.layer, (0, 0), self.layer)
-        return out
+    def compose(self, with_shadow_base: Optional[Image.Image] = None,
+                underlay: Optional[Image.Image] = None,
+                underlay_at: Tuple[int, int] = (0, 0)) -> Image.Image:
+        """合成棋盘。
+
+        underlay 插在棋盘纹理与棋子层之间, 用于领地热力图这类
+        「属于棋盘、但必须被棋子盖住」的底纹。
+        """
+        out = (with_shadow_base or self.base).copy().convert("RGBA")
+        if underlay is not None:
+            # alpha_composite 是标准 source-over, 不会把半透明色块压暗
+            out.alpha_composite(underlay, dest=underlay_at)
+        out.alpha_composite(self.layer)
+        return out.convert("RGB")

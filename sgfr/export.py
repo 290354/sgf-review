@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageDraw, ImageFilter
 
-from . import lz
+from . import __version__, lz
 from .renderer import Renderer, describe_komi, describe_result
 from .sgf import BLACK, WHITE, Review
 from .theme import THEMES, Theme, font
@@ -135,7 +135,7 @@ def write_json(rv: Review, tl: Timeline, path: str) -> None:
 
     data = {
         "tool": "sgf-review",
-        "version": "1.2.0",
+        "version": __version__,
         "source": os.path.basename(rv.source_path),
         "encoding": rv.source_encoding,
         "info": {

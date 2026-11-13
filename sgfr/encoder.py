@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from typing import List, Optional, Sequence
 
@@ -15,13 +16,60 @@ QUALITY = {
 }
 
 
-def ffmpeg_exe() -> str:
+def _find_ffmpeg() -> str:
+    """按 环境变量 > 随程序附带 > PATH 的顺序定位 ffmpeg.
+
+    Windows 绿色版 exe 不带 Python 环境, 用户可以:
+      1. 直接把 ffmpeg.exe 放在程序同目录 (发布包已附带);
+      2. 设置环境变量 SGFR_FFMPEG 指向任意 ffmpeg 可执行文件;
+      3. 把 ffmpeg 加入系统 PATH。
+    """
+    # 1) 显式指定
+    env = os.environ.get("SGFR_FFMPEG", "").strip().strip('"').strip("'")
+    if env:
+        if os.path.isfile(env):
+            return env
+        found = shutil.which(env)
+        if found:
+            return found
+
+    names = ("ffmpeg.exe", "ffmpeg") if os.name == "nt" else ("ffmpeg",)
+    roots: List[str] = []
+    if getattr(sys, "frozen", False):
+        # PyInstaller: 数据文件在 _MEIPASS, 用户放置的绿色版在 exe 同目录
+        roots.append(str(getattr(sys, "_MEIPASS", "")))
+        roots.append(os.path.dirname(os.path.abspath(sys.executable)))
+    roots.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    roots.append(os.getcwd())
+    for root in roots:
+        if not root:
+            continue
+        for sub in ("", "bin", "ffmpeg", "tools"):
+            for name in names:
+                p = os.path.join(root, sub, name) if sub else os.path.join(root, name)
+                if os.path.isfile(p):
+                    return p
+
+    # 3) 系统 PATH
     exe = shutil.which("ffmpeg")
-    if not exe:
-        raise RuntimeError(
-            "未找到 ffmpeg。请先安装: macOS `brew install ffmpeg` / "
-            "Ubuntu `sudo apt install ffmpeg` / Windows 从 ffmpeg.org 下载并加入 PATH。"
-        )
+    if exe:
+        return exe
+    raise RuntimeError(
+        "未找到 ffmpeg。请任选一种方式:\n"
+        "  · 把 ffmpeg.exe 放到本程序同目录 (Windows 发布包已附带)\n"
+        "  · 设置环境变量 SGFR_FFMPEG 指向 ffmpeg 可执行文件\n"
+        "  · 安装到 PATH: macOS `brew install ffmpeg` / "
+        "Ubuntu `sudo apt install ffmpeg` / Windows 从 ffmpeg.org 下载"
+    )
+
+
+def ffmpeg_exe() -> str:
+    """缓存探测结果, 避免逐帧 / 每段渲染反复遍历目录."""
+    cached = globals().get("_SGFR_FFMPEG")
+    if cached:
+        return cached
+    exe = _find_ffmpeg()
+    globals()["_SGFR_FFMPEG"] = exe
     return exe
 
 

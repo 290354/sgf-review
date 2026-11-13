@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as cf
+import json
 import math
 import os
 import shutil
@@ -19,32 +20,8 @@ from .renderer import Renderer, describe_komi, describe_result
 from .sgf import parse_collection_reviews
 from .theme import THEMES, get_theme
 from .timeline import Timing, build_timeline
-
-SIZE_PRESETS = {
-    "1080p": (1920, 1080),
-    "720p": (1280, 720),
-    "1440p": (2560, 1440),
-    "4k": (3840, 2160),
-    "2160p": (3840, 2160),
-    "vertical": (1080, 1920),
-    "shorts": (1080, 1920),
-    "square": (1080, 1080),
-}
-
-
-def parse_size(txt: str) -> Tuple[int, int]:
-    s = (txt or "").strip().lower()
-    if s in SIZE_PRESETS:
-        return SIZE_PRESETS[s]
-    if "x" in s:
-        a, b = s.split("x", 1)
-        try:
-            w, h = int(a), int(b)
-            if w >= 240 and h >= 240:
-                return (w // 2 * 2, h // 2 * 2)
-        except ValueError:
-            pass
-    raise argparse.ArgumentTypeError(f"无法识别的分辨率 '{txt}' (示例: 1920x1080, vertical, 4k)")
+# 常量独立成模块, 图形界面复用时不会连带加载 numpy / Pillow
+from .presets import PRESETS, parse_size
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -83,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="不显示 AI 分析面板(即使棋谱含 LizzieYzy 分析数据)")
     p.add_argument("--heatmap", action="store_true",
                    help="在棋盘上叠加 AI 领地热力图(需 ownership 数据)")
+    p.add_argument("--heat-strength", type=float, default=1.0, metavar="0~1.5",
+                   help="领地热力图浓度 (默认 1.0)")
+    p.add_argument("--no-heat-transition", action="store_true",
+                   help="关闭领地色块的逐手流动过渡(静态显示, 更省资源)")
+    p.add_argument("--no-heat-legend", action="store_true",
+                   help="不显示棋盘上方的领地配色图例")
     p.add_argument("--no-ai-commentary", action="store_true",
                    help="不根据胜率变化自动生成 AI 点评字幕")
     p.add_argument("--line", default="longest", choices=["longest", "first", "last"],
@@ -114,7 +97,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-outro", action="store_true", help="不要片尾")
     p.add_argument("--info", action="store_true", help="只打印棋谱信息")
     p.add_argument("--list-themes", action="store_true", help="列出所有主题")
+    p.add_argument("--list-presets", action="store_true", help="列出所有预设方案")
     p.add_argument("--quiet", action="store_true")
+
+    # --- 工作流 / 资源 ---
+    g = p.add_argument_group("工作流与资源")
+    g.add_argument("--preset", default=None, metavar="NAME",
+                   help="一键套用方案: " + ", ".join(PRESETS) + "  (--list-presets 查看详情)")
+    g.add_argument("--config", default=None, metavar="JSON",
+                   help="从 JSON 配置文件读取参数 (命令行显式参数优先)")
+    g.add_argument("--save-config", default=None, metavar="JSON",
+                   help="把本次生效的参数保存成 JSON 配置, 方便复用")
+    g.add_argument("--dry-run", action="store_true",
+                   help="只打印渲染计划(分辨率/帧数/时长/输出), 不实际渲染")
+    g.add_argument("--benchmark", action="store_true",
+                   help="试渲染若干帧并报告单帧耗时 / 预估总耗时 / 峰值内存")
+    g.add_argument("--chapters", default=None, metavar="TXT",
+                   help="导出 YouTube / B 站章节时间戳 (基于 AI 关键手)")
+    g.add_argument("--eco", action="store_true",
+                   help="低占用模式: 单/双进程、限制缓存与分辨率, 适合后台长时间渲染")
+    g.add_argument("--skip-existing", action="store_true",
+                   help="输出文件已存在时跳过, 便于批量任务中断后续跑")
+    g.add_argument("--version", action="store_true", help="显示版本号并退出")
     return p
 
 
@@ -137,6 +141,10 @@ def build_renderer(cfg: Dict) -> Renderer:
         lang=cfg["lang"], watermark=cfg["watermark"],
         show_analysis=cfg.get("analysis", True),
         show_heatmap=cfg.get("heatmap", False),
+        heatmap_strength=cfg.get("heatmap_strength", 1.0),
+        heatmap_transition=cfg.get("heatmap_transition", True),
+        heatmap_legend=cfg.get("heatmap_legend", True),
+        eco=cfg.get("eco", False),
         ai_commentary=cfg.get("ai_commentary", True),
     )
 
@@ -257,6 +265,12 @@ def _side_exports(rnd, rv, tl, args, video_path: str) -> None:
                                    lang=args.lang)
         if not args.quiet:
             print(f"关键手集锦: {p}  ({n} 手)")
+    if getattr(args, "chapters", None):
+        from .workflow import write_chapters
+        p = args.chapters if str(args.chapters).endswith(".txt") else stem + "_chapters.txt"
+        n = write_chapters(rv, tl, p, args.lang)
+        if not args.quiet:
+            print(f"章节标记: {p}  ({n} 条)")
 
 
 def run_one(args, path: str, out_path: Optional[str]) -> int:
@@ -301,10 +315,32 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
             label_count=args.label_count, comment=not args.no_comment,
             lang=args.lang, watermark=args.watermark,
             analysis=not args.no_analysis, heatmap=args.heatmap,
+            heatmap_strength=getattr(args, "heat_strength", 1.0),
+            heatmap_transition=getattr(args, "heatmap_transition", True),
+            heatmap_legend=getattr(args, "heatmap_legend", True),
+            eco=getattr(args, "eco", False),
             ai_commentary=not args.no_ai_commentary,
             quality=args.quality, codec=args.codec,
+            srt=args.srt, json=args.json, poster=args.poster, gif=args.gif,
+            theme_sheet=args.theme_sheet, highlights=args.highlights,
+            chapters=getattr(args, "chapters", None),
         )
         rnd = build_renderer(cfg)
+
+        # 热力图请求但棋谱没有 ownership 数据时明确提示, 而不是静默忽略
+        if args.heatmap and not rnd.show_heatmap and not args.quiet:
+            if rv.series is None or not any(
+                    an is not None and an.ownership for an in rv.series.points):
+                print("提示: 该棋谱不含 ownership 领地数据, 已跳过热力图 "
+                      "(需 LizzieYzy / KataGo 分析过的 SGF)")
+
+        if getattr(args, "benchmark", False):
+            from .workflow import run_benchmark, print_benchmark
+            jobs = _auto_jobs() if args.jobs <= 0 else args.jobs
+            jobs = max(1, min(2 if args.eco else 8, jobs))
+            res = run_benchmark(rnd)
+            print_benchmark(res, jobs)
+            return 0
 
         if args.preview:
             os.makedirs(os.path.dirname(os.path.abspath(args.preview)) or ".", exist_ok=True)
@@ -317,7 +353,8 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
 
         # 纯导出模式: 不渲染主视频
         only_side = any([args.gif, args.srt, args.json, args.poster,
-                         args.theme_sheet, args.highlights])
+                         args.theme_sheet, args.highlights,
+                         getattr(args, "chapters", None)])
 
         target = out_path
         if target is None:
@@ -340,6 +377,21 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
                 print(f"提示: 该编码使用 MP4 容器, 输出改名为 {target}")
 
         os.makedirs(os.path.dirname(os.path.abspath(target)) or ".", exist_ok=True)
+
+        # 断点续跑: 输出已存在且非空, 且没有指定附属导出时直接跳过
+        if getattr(args, "skip_existing", False) and os.path.exists(target) \
+                and os.path.getsize(target) > 4096 and not only_side:
+            if not args.quiet:
+                print(f"跳过(已存在): {target}")
+            continue
+
+        if getattr(args, "dry_run", False):
+            from .workflow import print_plan
+            jobs = _auto_jobs() if args.jobs <= 0 else args.jobs
+            jobs = max(1, min(2 if args.eco else 8, jobs))
+            print_plan(rv, tl, cfg, target, jobs)
+            continue
+
         t0 = time.time()
         nframes = rnd.n_frames
         f0, f1 = 0, nframes
@@ -385,6 +437,8 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
             jobs = args.jobs
             if jobs <= 0:
                 jobs = _auto_jobs()
+            if getattr(args, "eco", False):
+                jobs = min(jobs, 2)   # 低占用: 最多两个渲染进程
             if args.range:
                 jobs = 1  # 片段模式不并行, 避免起点状态不一致
             jobs = max(1, min(jobs, max(1, nframes // 45)))
@@ -476,15 +530,40 @@ def _bar(done: int, total: int, t0: float) -> None:
 
 # --------------------------------------------------------------------------- #
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    from . import __version__
+    from .workflow import (apply_preset_config, eco_environment,
+                           list_presets, save_config)
+
     args = build_parser().parse_args(argv)
 
+    if args.version:
+        print(f"sgf-review {__version__}")
+        return 0
     if args.list_themes:
         print("可用主题:")
         for k, t in THEMES.items():
             print(f"  {k:<10} {t.label}")
         return 0
+    if args.list_presets:
+        list_presets()
+        return 0
+
+    try:
+        args, notes = apply_preset_config(args, argv)
+    except (ValueError, OSError, json.JSONDecodeError) as e:
+        print(f"错误: {e}", file=sys.stderr)
+        return 2
+    if args.eco:
+        eco_environment()
+    if notes and not args.quiet:
+        print(f"已套用: {' + '.join(notes)}")
+
+    if args.save_config:
+        save_config(args, args.save_config)
 
     if not args.inputs:
+        if args.save_config:
+            return 0
         build_parser().print_help()
         return 1
 
