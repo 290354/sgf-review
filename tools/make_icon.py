@@ -57,7 +57,9 @@ def main() -> None:
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     img.save(OUT, sizes=[(16, 16), (24, 24), (32, 32), (48, 48),
                          (64, 64), (128, 128), (256, 256)])
-    print("图标已生成:", OUT)
+    # 纯 ASCII: Windows runner 的 stdout 可能是 cp1252, 中文 print 会抛
+    # UnicodeEncodeError 让整个构建失败; 这里不依赖任何区域设置。
+    print("icon written:", OUT)
 
 
 if __name__ == "__main__":

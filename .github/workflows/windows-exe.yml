@@ -9,6 +9,13 @@ on:
 permissions:
   contents: write
 
+# Windows runner 的控制台默认 cp1252, 中文日志会让 Python 抛
+# UnicodeEncodeError。全局强制 UTF-8, 覆盖所有 Python 子进程
+# (图标生成 / PyInstaller / exe 冒烟自检 / --cli 渲染通道)。
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
 jobs:
   build:
     runs-on: windows-latest
