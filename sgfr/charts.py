@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .lz import AnalysisSeries
-from .theme import RGB, Theme, mix, shade
+from .theme import RGB, Theme
 
 SS = 3  # 超采样倍数
 
@@ -40,7 +40,6 @@ class ChartBox:
 
 def _segments(values: Sequence[Optional[float]], max_gap: int = 8):
     """把带缺口的序列切成连续段; 短缺口线性插值补上."""
-    n = len(values)
     out: List[List[Tuple[int, float]]] = []
     cur: List[Tuple[int, float]] = []
     gap: List[int] = []
