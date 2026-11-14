@@ -11,6 +11,8 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .encoder import _NOWIN, ffmpeg_exe
+
 SR = 44100
 
 
@@ -109,10 +111,10 @@ class Mixer:
         if not path.lower().endswith(".wav"):
             tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             tmp.close()
-            cmd = ["ffmpeg", "-y", "-v", "error", "-i", path,
+            cmd = [ffmpeg_exe(), "-y", "-v", "error", "-i", path,
                    "-ac", "2", "-ar", str(SR), "-f", "wav", tmp.name]
             try:
-                subprocess.run(cmd, check=True)
+                subprocess.run(cmd, check=True, creationflags=_NOWIN)
                 wav = tmp.name
             except Exception:
                 if os.path.exists(tmp.name):

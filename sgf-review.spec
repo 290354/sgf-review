@@ -17,7 +17,7 @@ hidden = [
     "sgfr.renderer", "sgfr.boardview", "sgfr.board", "sgfr.theme",
     "sgfr.timeline", "sgfr.lz", "sgfr.sgf", "sgfr.charts",
     "sgfr.graphics", "sgfr.audio", "sgfr.encoder", "sgfr.export",
-    "numpy", "PIL", "tkinter",
+    "numpy", "PIL", "PIL._tkinter_finder", "tkinter", "tkinter.font",
 ]
 hidden += collect_submodules("numpy")
 hidden += collect_submodules("PIL")

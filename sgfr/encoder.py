@@ -15,6 +15,9 @@ QUALITY = {
     "ultra": {"h264": "18M", "hevc": "13M", "vp9": "14"},
 }
 
+# Windows 下每次启动控制台子进程都会闪一个黑框, 统一抑制.
+_NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
 
 def _find_ffmpeg() -> str:
     """按 环境变量 > 随程序附带 > PATH 的顺序定位 ffmpeg.
@@ -76,7 +79,9 @@ def ffmpeg_exe() -> str:
 def has_encoder(name: str) -> bool:
     try:
         out = subprocess.run([ffmpeg_exe(), "-hide_banner", "-encoders"],
-                             capture_output=True, text=True, timeout=20).stdout
+                             capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=20,
+                             creationflags=_NOWIN).stdout
         return name in out
     except Exception:
         return False
@@ -101,7 +106,7 @@ def _pick_codec(kind: str):
 
 def open_writer(path: str, w: int, h: int, fps: int, quality: str = "high",
                 codec: str = "h264", audio: Optional[str] = None,
-                audio_offset: float = 0.0) -> subprocess.Popen:
+                audio_offset: float = 0.0, threads: int = 0) -> subprocess.Popen:
     """打开一个 ffmpeg 进程, stdin 接受 rgb24 裸帧.
 
     audio_offset: 只渲染片段时音频输入要跳过的时间(秒). 不加的话,
@@ -127,7 +132,7 @@ def open_writer(path: str, w: int, h: int, fps: int, quality: str = "high",
         cmd += ["-b:v", q["h264"], "-pix_fmt", "yuv420p", "-g", str(fps * 2)]
         if "libopenh264" in cargs:
             cmd += ["-bf", "0"]
-    cmd += ["-threads", "0"]
+    cmd += ["-threads", str(threads) if threads > 0 else "0"]
     if audio:
         if webm:
             # WebM 容器不允许 AAC, 必须用 Opus / Vorbis
@@ -144,7 +149,8 @@ def open_writer(path: str, w: int, h: int, fps: int, quality: str = "high",
     log = tempfile.NamedTemporaryFile(suffix=".fflog", delete=False)
     log.close()
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                            stderr=open(log.name, "wb"))
+                            stderr=open(log.name, "wb"),
+                            creationflags=_NOWIN)
     proc._sgfr_log = log.name  # type: ignore[attr-defined]
     return proc
 
@@ -182,7 +188,8 @@ def concat_segments(paths: Sequence[str], out_path: str, workdir: str) -> None:
             fh.write(f"file '{os.path.abspath(p).replace(chr(92), '/')}'\n")
     cmd = [ffmpeg_exe(), "-y", "-v", "error", "-f", "concat", "-safe", "0",
            "-i", lst, "-c", "copy", out_path]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", creationflags=_NOWIN)
     if r.returncode != 0:
         raise RuntimeError(f"分段拼接失败:\n{r.stderr[:1500]}")
 
@@ -202,6 +209,7 @@ def mux_audio(video: str, audio: str, out_path: str, copy_video: bool = True,
         cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest",
                 "-movflags", "+faststart"]
     cmd += [out_path]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", creationflags=_NOWIN)
     if r.returncode != 0:
         raise RuntimeError(f"音轨合成失败:\n{r.stderr[:1500]}")

@@ -156,7 +156,8 @@ def _render_segment(job) -> Tuple[int, str]:
         idx, _ = rnd.tl.slot_at(start / float(cfg["fps"]))
         rnd.seek(idx)
     proc = senc.open_writer(path, cfg["width"], cfg["height"], cfg["fps"],
-                            cfg["quality"], cfg["codec"], audio=None)
+                            cfg["quality"], cfg["codec"], audio=None,
+                            threads=2 if cfg.get("eco") else 0)
     assert proc.stdin is not None
     try:
         for i in range(start, end):
@@ -441,6 +442,11 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
                 jobs = min(jobs, 2)   # 低占用: 最多两个渲染进程
             if args.range:
                 jobs = 1  # 片段模式不并行, 避免起点状态不一致
+            # Windows 单文件版: 每个 worker 都要把 onefile 解压一份到临时目录,
+            # spawn 开销远大于并行收益; 未显式指定进程数时收敛到单进程.
+            if (jobs > 1 and os.name == "nt" and getattr(sys, "frozen", False)
+                    and args.jobs <= 0):
+                jobs = 1
             jobs = max(1, min(jobs, max(1, nframes // 45)))
 
             if args.codec == "hevc" and not senc.has_encoder("libx265") and not args.quiet:
@@ -459,7 +465,8 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
                 aoff = (f0 / args.fps) if args.range else 0.0
                 proc = senc.open_writer(seg, w, h, args.fps, args.quality,
                                         args.codec, audio=wav if has_audio else None,
-                                        audio_offset=aoff)
+                                        audio_offset=aoff,
+                                        threads=2 if getattr(args, "eco", False) else 0)
                 assert proc.stdin is not None
                 try:
                     for i in range(f0, f1):
@@ -652,7 +659,11 @@ def _auto_jobs() -> int:
     """按 CPU 配额与可用内存决定并行进程数 (每个进程约 1.1GB)."""
     cpus = int(max(1, min(_cgroup_cpus(), os.cpu_count() or 4)))
     by_mem = int(max(1, (_mem_gb() * 0.72) // 1.1))
-    return int(max(1, min(8, cpus, by_mem)))
+    jobs = int(max(1, min(8, cpus, by_mem)))
+    if os.name == "nt":
+        # Windows 桌面机还要留出前台交互的余量, 默认最多 2 进程
+        jobs = min(jobs, 2)
+    return jobs
 
 
 def _run_parallel(nframes: int, jobs: int, work: str, cfg,

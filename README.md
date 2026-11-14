@@ -8,11 +8,18 @@ python3 sgf_review.py 棋谱.sgf -o 回顾.mp4
 
 > 20 秒看懂效果：`output/01_alphago_vs_leesedol.mp4`（AlphaGo vs 李世石第四局，带职业解说）
 
-## v2.0.0 更新
+## v2.1.0 更新
 
-- **领地热力图重做**：修正半格偏移、离散硬边圆点、暗色主题下看不清、切手硬跳变、色块盖棋子等问题，改为连续领地场 + 主题自适应冷暖色 + 淡入/crossfade 流动动画 + 配色图例，并做了栅格化与缓存优化。
-- **实用工作流**：5 套一键预设、JSON 配置、`--dry-run` 试运行、`--benchmark` 性能基准、章节时间戳导出、低占用模式 `--eco`、断点续跑 `--skip-existing`。
-- **图形界面**：`python3 sgf_gui.py`（或 Windows 版双击 exe），带分镜预览、参数摘要、实时日志与进度条。
+- **全新液态玻璃界面**：重写桌面 GUI 视觉层——真实 backdrop blur（裁切背景→高斯模糊→提亮→内高光描边）的毛玻璃卡片、22px 圆角、外阴影浮层；胶囊按钮、圆形勾选、细轨道滑块、流光进度条全部自绘；深空渐变背景叠加四团柔光与细噪点。Windows 11 下自动启用深色标题栏与圆角窗口。
+- **Windows 稳定性修复**（上一版实际运行中暴露的问题）：
+  - 补齐 `multiprocessing.freeze_support()`，修复单文件 exe 创建进程池时反复重启自身；
+  - ffmpeg 子进程统一 `CREATE_NO_WINDOW`，不再反复闪黑框；
+  - Windows 默认收敛到单进程（onefile 每个 worker 都要解压一份，并行反而更慢）；`--eco` 下 ffmpeg 限 2 线程；
+  - 「停止」改用 `taskkill /T` 杀进程树，不再残留 ffmpeg 占用输出文件；
+  - 声明 per-monitor DPI 感知，高分屏不再整窗发虚；
+  - BGM 转码改用统一的 `ffmpeg_exe()` 探测，绿色版同目录的 ffmpeg 现在能被找到；
+  - 窗口尺寸按屏幕自适应，小屏笔记本不再把底部按钮顶出屏幕。
+- **v2.0 既有能力**：5 套一键预设、JSON 配置、`--dry-run` 试运行、`--benchmark` 性能基准、章节时间戳导出、低占用模式 `--eco`、断点续跑 `--skip-existing`，以及重做后的领地热力图。
 - **Windows 免安装绿色版**：[Releases](https://github.com/290354/sgf-review/releases) 下载 `sgf-review-win64.zip`，解压即用，无需 Python；包内已附带 `ffmpeg.exe`。
 
 详见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
@@ -25,7 +32,7 @@ python3 sgf_review.py 棋谱.sgf -o 回顾.mp4
 # 依赖: Python 3.9+ / Pillow / NumPy / ffmpeg (含 libx264 或 libopenh264)
 pip3 install -r requirements.txt
 
-# 图形界面 (推荐新手): 选棋谱 -> 预览画面 -> 开始渲染
+# 图形界面 (推荐): 液态玻璃风格工作台, 选棋谱 -> 预览画面 -> 开始渲染
 python3 sgf_gui.py
 
 # 基础用法
@@ -322,7 +329,7 @@ sgf-review/
 │   ├── cli.py             # 参数与主流程
 │   ├── presets.py         # 分辨率/预设/配置键常量（轻量, GUI 复用）
 │   ├── workflow.py        # 预设合并、试运行、性能基准、章节、资源上限
-│   └── gui.py             # tkinter 图形界面
+│   └── gui.py             # 液态玻璃图形界面 (backdrop blur / 自绘控件)
 ├── assets/                # exe 图标、Windows 使用说明
 │   └── icon.ico
 ├── .github/workflows/

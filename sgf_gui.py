@@ -11,6 +11,8 @@ exe 后 sys.executable 就是 exe 本身, 这条通道依旧有效。
 """
 from __future__ import annotations
 
+import multiprocessing
+
 import os
 import sys
 
@@ -33,4 +35,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # 必须在任何进程池创建之前调用: Windows 用 spawn 启动子进程,
+    # PyInstaller 冻结后子进程会重新执行入口; 没有这行会无限套娃.
+    multiprocessing.freeze_support()
     sys.exit(main() or 0)

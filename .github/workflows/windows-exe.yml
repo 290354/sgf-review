@@ -38,6 +38,9 @@ jobs:
       - name: 生成程序图标
         run: python tools/make_icon.py
 
+      - name: 依赖自检 (GUI 图形栈)
+        run: python -c "import tkinter, PIL.ImageTk, tkinter.font; import sgfr.gui; print('gui deps ok')"
+
       - name: 下载 ffmpeg (Windows 静态构建)
         shell: pwsh
         run: |
@@ -88,7 +91,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ github.ref_name }}"
-          if ($tag -notlike "v*") { $tag = "v2.0.0" }
+          if ($tag -notlike "v*") { $tag = "v2.1.0" }
           gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --title "sgf-review $tag" `
