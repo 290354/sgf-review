@@ -183,6 +183,10 @@ def main() -> int:
         ch_path = os.path.join(tempfile.gettempdir(), "sgfr_chapters_test.txt")
         n = write_chapters(rv, tl, ch_path, "zh")
         check("chapters 生成", n >= 2 and os.path.getsize(ch_path) > 10, n)
+        ch_lines = open(ch_path, encoding="utf-8").read().splitlines()
+        dup = [ln for ln in ch_lines
+               if len(ln.split("· ")) > 1 and ln.split("· ")[0].strip().endswith(ln.split("· ")[1].strip())]
+        check("chapters 无重复手数标题", not dup, dup[:2])
 
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

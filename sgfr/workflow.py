@@ -252,8 +252,9 @@ def write_chapters(rv, tl, path: str, lang: str = "zh", max_items: int = 24) -> 
         for i in range(step - 1, len(rv.moves), step):
             if i < len(tl.slots):
                 mv = rv.moves[i]
-                items.append((tl.slots[i].start, mv.number,
-                              f"第 {mv.number} 手" if zh else f"Move {mv.number}"))
+                # 等间隔补齐没有具体标签, 留空; 输出层会自动只写「第 N 手」,
+                # 避免拼成「第 N 手 · 第 N 手」这种重复标题。
+                items.append((tl.slots[i].start, mv.number, ""))
     items.sort(key=lambda x: x[0])
     # 去重 + 最小间隔, 避免章节挤在一起
     last = -10.0
@@ -261,10 +262,10 @@ def write_chapters(rv, tl, path: str, lang: str = "zh", max_items: int = 24) -> 
         if t - last < 4.0:
             continue
         last = t
-        if zh:
-            lines.append(f"{_ts(t)} 第 {num} 手 · {label}")
-        else:
-            lines.append(f"{_ts(t)} Move {num} · {label}")
+        head = f"第 {num} 手" if zh else f"Move {num}"
+        # label 与手数前缀相同(或为空)时不重复拼接
+        lines.append(f"{_ts(t)} {head}" +
+                     (f" · {label}" if label and label.strip() != head else ""))
         if len(lines) >= max_items:
             break
     if tl.outro_start > last + 4.0:
