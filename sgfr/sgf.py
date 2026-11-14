@@ -655,8 +655,10 @@ def parse_sgf(path: str, line_strategy: str = "longest") -> Review:
 
     if info.handicap == 0 and len(setup_b) > 1:
         info.handicap = len(setup_b)
-    if not info.komi and info.handicap:
-        info.komi = 0.5 if info.handicap else None
+    # KM[0] 是合法的 0 贴目(让子棋常见), 必须原样保留; 只有棋谱完全没有写
+    # KM 属性时才为让子局补默认贴目。用 `is None` 而非 `not`, 避免把 0.0 吞掉。
+    if info.komi is None and info.handicap:
+        info.komi = 0.5
 
     review.total_nodes = sum(1 for _ in _walk(root))
     review.series = lz.build_series(review.moves, info.size_x, info.size_y, info.komi)

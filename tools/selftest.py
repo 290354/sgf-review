@@ -57,6 +57,20 @@ def main() -> int:
     rv = parse_collection_reviews(p)[0]
     check("压缩矩形 AB", len(rv.setup_black) == 9, str(rv.setup_black))
 
+    # 显式 KM[0] 是合法的 0 贴目, 不得被让子局默认贴目覆盖;
+    # 单局 API 与合集 API 两条解析路径必须给出一致结果。
+    p = write("(;GM[1]FF[4]SZ[19]HA[4]KM[0]PB[A]PW[B]"
+              ";AB[pd][dp][dd][pp];W[qp];B[qo])")
+    from sgfr.sgf import parse_sgf
+    k_single = parse_sgf(p).info.komi
+    k_multi = parse_collection_reviews(p)[0].info.komi
+    check("KM[0] 单局 API 保留 0 贴目", k_single == 0.0, k_single)
+    check("KM[0] 合集 API 保留 0 贴目", k_multi == 0.0, k_multi)
+    check("KM[0] 两条路径一致", k_single == k_multi, (k_single, k_multi))
+    p = write("(;GM[1]FF[4]SZ[19]HA[4]PB[A]PW[B];B[cc];W[dd])")
+    check("无 KM 让子局补默认贴目", parse_sgf(p).info.komi == 0.5,
+          parse_sgf(p).info.komi)
+
     p = write("(;GM[1]FF[4]SZ[9];B[aa];B[aa];W[bb];B[];W[];B[cc])")
     rv = parse_collection_reviews(p)[0]
     problems = validate(rv)
