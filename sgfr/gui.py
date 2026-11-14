@@ -978,6 +978,15 @@ class App:
                 self.v_bgm_gain.set(float(d["bgm_gain"]))
         except (TypeError, ValueError):
             pass
+        # 路径可能来自另一台机器或被移动过, 失效就清空, 避免启动后第一次渲染才报错
+        sgf = self.v_sgf.get().strip()
+        if sgf and not os.path.isfile(sgf):
+            self.v_sgf.set("")
+        out = self.v_out.get().strip()
+        if out:
+            folder = os.path.dirname(out)
+            if folder and not os.path.isdir(folder):
+                self.v_out.set("")
 
     def _save_prefs(self) -> None:
         mp = {"preset": self.v_preset, "theme": self.v_theme,
