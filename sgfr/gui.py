@@ -53,7 +53,6 @@ THEME_LABELS = (
 
 # 预设里界面未直接暴露的键 -> 命令行开关
 EXTRA_FLAGS = {
-    "labels": "--labels",
     "label_count": "--label-count",
     "intro": "--intro",
     "outro": "--outro",
@@ -642,6 +641,12 @@ class App:
         self.v_poster = v.BooleanVar(value=False)
         self.v_skip = v.BooleanVar(value=True)
         self.v_eco = v.BooleanVar(value=True)
+        self.v_kit = v.StringVar(value="kaya")
+        self.v_labels = v.StringVar(value="recent")
+        self.v_lang = v.StringVar(value="zh")
+        self.v_srt = v.BooleanVar(value=False)
+        self.v_gif = v.BooleanVar(value=False)
+        self.v_json = v.BooleanVar(value=False)
         self.v_status = v.StringVar(value="就绪")
 
     def _style(self) -> None:
@@ -810,7 +815,8 @@ class App:
             ("评论字幕", self.v_comment), ("领地流动过渡", self.v_transition),
             ("配色图例", self.v_legend), ("导出章节标记", self.v_chapters),
             ("导出海报帧", self.v_poster), ("跳过已存在", self.v_skip),
-            ("低占用模式", self.v_eco),
+            ("低占用模式", self.v_eco), ("导出SRT字幕", self.v_srt),
+            ("导出GIF动图", self.v_gif), ("导出JSON", self.v_json),
         ]
         for i, (txt, var) in enumerate(opts):
             GlassCheck(g, txt, var, font=(_FF, 9)).grid(
@@ -822,6 +828,18 @@ class App:
         self._spin(row, self.v_jobs, 0, 8, 52).pack(side="left")
         self._label(row, "0 = 自动; Windows 单文件版建议 1", fg=FAINT,
                     size=8).pack(side="left", padx=(8, 0))
+
+        row2 = tk.Frame(inner, bg=PANE)
+        row2.pack(fill="x", pady=(7, 0))
+        self._label(row2, "音效包").pack(side="left", padx=(0, 8))
+        RoundCombo(row2, self.v_kit, ["kaya", "slate", "paper", "ice"],
+                   width=92, height=28).pack(side="left")
+        self._label(row2, "手数标注").pack(side="left", padx=(14, 8))
+        RoundCombo(row2, self.v_labels, ["none", "last", "recent", "all"],
+                   width=92, height=28).pack(side="left")
+        self._label(row2, "语言").pack(side="left", padx=(14, 8))
+        RoundCombo(row2, self.v_lang, ["zh", "en"],
+                   width=72, height=28).pack(side="left")
 
     def _spin(self, parent, var, lo: int, hi: int, width: int) -> tk.Canvas:
         cv = tk.Canvas(parent, width=width, height=28, bg=PANE,
@@ -1095,6 +1113,8 @@ class App:
         self.v_quality.set(p.get("quality", "high"))
         self.v_jobs.set(str(p.get("jobs", 0)))
         self.v_heat.set(bool(p.get("heatmap", False)))
+        self.v_eco.set(bool(p.get("eco", False)))
+        self.v_labels.set(str(p.get("labels", "recent") or "recent"))
         if p.get("eco", False):
             self.v_eco.set(True)
         self.preset_desc.configure(text=PRESET_DESC.get(key, ""))
@@ -1143,7 +1163,14 @@ class App:
                 a += [flag, str(val)]
         a += ["--theme", self.v_theme.get(), "--size", self.v_size.get(),
               "--fps", str(self._int(self.v_fps, 30)),
-              "--quality", self.v_quality.get(), "--codec", self.v_codec.get()]
+              "--quality", self.v_quality.get(), "--codec", self.v_codec.get(),
+              "--lang", self.v_lang.get() or "zh"]
+        kit = self.v_kit.get()
+        if kit and kit != "kaya":
+            a += ["--kit", kit]
+        lab = self.v_labels.get()
+        if lab and lab != "recent":
+            a += ["--labels", lab]
         dur = self.v_duration.get().strip()
         if dur:
             a += ["--duration", dur]
@@ -1178,6 +1205,12 @@ class App:
                 a += ["--chapters", stem + "_chapters.txt"]
             if self.v_poster.get():
                 a += ["--poster", stem + "_poster.png"]
+            if self.v_srt.get():
+                a += ["--srt", stem + ".srt"]
+            if self.v_gif.get():
+                a += ["--gif", stem + ".gif"]
+            if self.v_json.get():
+                a += ["--json", stem + ".json"]
         if mode == "info":
             a.append("--info")
         elif mode == "preview":

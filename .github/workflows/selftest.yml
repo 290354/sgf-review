@@ -1,0 +1,49 @@
+name: selftest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 准备 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 解析 / 棋盘 / CLI 回归
+        run: python tools/selftest.py
+
+      - name: 版本与棋谱信息
+        run: |
+          python sgf_review.py --version
+          python sgf_review.py examples/demo_minimal.sgf --info
+          python sgf_review.py --list-themes
+          python sgf_review.py --list-presets
+
+      - name: 渲染冒烟 (720p / 6 秒 / 无音频)
+        run: |
+          python sgf_review.py examples/demo_minimal.sgf \
+            -o /tmp/smoke.mp4 --size 720p --duration 6 --no-audio --quiet
+          python - <<'PY'
+          import os
+          p = "/tmp/smoke.mp4"
+          assert os.path.isfile(p) and os.path.getsize(p) > 100_000, p
+          print("smoke ok", os.path.getsize(p), "bytes")
+          PY

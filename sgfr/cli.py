@@ -122,7 +122,6 @@ def build_parser() -> argparse.ArgumentParser:
                    help="低占用模式: 单/双进程、限制缓存与分辨率, 适合后台长时间渲染")
     g.add_argument("--skip-existing", action="store_true",
                    help="输出文件已存在时跳过, 便于批量任务中断后续跑")
-    g.add_argument("--version", action="store_true", help="显示版本号并退出")
     return p
 
 

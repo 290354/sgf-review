@@ -122,6 +122,54 @@ def main() -> int:
                     n += 1
     check("examples+analysis 无异常", n >= 10, f"n={n}")
 
+    print("== CLI / workflow ==")
+    from sgfr.cli import build_parser, parse_size
+    from sgfr.renderer import describe_result
+    from sgfr.workflow import apply_preset_config, write_chapters
+    from sgfr.timeline import Timing, build_timeline
+    from collections import Counter
+
+    p = build_parser()
+    c = Counter()
+    for a in p._actions:
+        for s in a.option_strings:
+            c[s] += 1
+    dups = [s for s, n in c.items() if n > 1]
+    check("argparse 无重复选项", not dups, str(dups))
+    vers = [a for a in p._actions if "--version" in a.option_strings]
+    check("--version 只注册一次", len(vers) == 1, len(vers))
+
+    check("parse_size 1080p", parse_size("1080p") == (1920, 1080))
+    check("parse_size vertical", parse_size("vertical") == (1080, 1920))
+    check("parse_size custom", parse_size("1280x720") == (1280, 720))
+    try:
+        parse_size("bogus")
+        check("parse_size 非法报错", False)
+    except Exception:
+        check("parse_size 非法报错", True)
+
+    check("describe B+R", describe_result("B+R", "zh")[0] == "黑中盘胜",
+          describe_result("B+R", "zh"))
+    check("describe W+3.5", "白" in describe_result("W+3.5", "zh")[0],
+          describe_result("W+3.5", "zh"))
+    check("describe 和局", describe_result("0", "zh")[0] == "和局")
+
+    args = p.parse_args(["x.sgf", "--preset", "fast"])
+    args, notes = apply_preset_config(args, ["x.sgf", "--preset", "fast"])
+    check("preset fast eco", bool(getattr(args, "eco", False)))
+    check("preset fast no_intro", bool(getattr(args, "no_intro", False)))
+    check("preset fast size", args.size == "720p", args.size)
+    check("preset fast fps", args.fps == 24, args.fps)
+
+    # chapters
+    demo = os.path.join(ROOT, "examples", "demo_19x19.sgf")
+    if os.path.exists(demo):
+        rv = parse_collection_reviews(demo)[0]
+        tl = build_timeline(rv, Timing())
+        ch_path = os.path.join(tempfile.gettempdir(), "sgfr_chapters_test.txt")
+        n = write_chapters(rv, tl, ch_path, "zh")
+        check("chapters 生成", n >= 2 and os.path.getsize(ch_path) > 10, n)
+
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 
