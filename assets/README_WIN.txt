@@ -1,4 +1,4 @@
-SGF Review v2.0.0 · Windows 绿色版
+SGF Review v3.0.0 · Windows 绿色版
 ======================================
 
 【快速开始】
@@ -13,6 +13,11 @@ SGF Review v2.0.0 · Windows 绿色版
 若被误删，可以：
   · 重新下载 ffmpeg 并加入系统 PATH；
   · 或设置环境变量 SGFR_FFMPEG 指向任意 ffmpeg.exe 的完整路径。
+
+【进阶设置】
+主界面点「进阶…」可设置背景音乐与音量、播放速度、合集局号、
+关键手集锦、GIF 帧率/缩放、海报手数。关闭窗口后所有参数会自动记住，
+下次打开直接接着用（保存在 %USERPROFILE%\.sgf-review\gui.json）。
 
 【低占用模式（默认开启）】
 最多 2 个渲染进程、限制 BLAS 线程数、关闭逐帧过渡动画。
@@ -42,5 +47,8 @@ A: 确认 ffmpeg.exe 与 exe 同目录且可运行；也可在命令行里加 --
 
 Q: 界面字体显示异常？
 A: 程序自动使用 Windows 自带的微软雅黑 / 宋体，无需安装额外字体。
+
+Q: 参数调乱了想恢复默认？
+A: 关闭程序后删除 %USERPROFILE%\.sgf-review\gui.json，重新打开即为默认值。
 
 项目主页：https://github.com/290354/sgf-review

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+import json
 import os
 import queue
 import re
@@ -612,6 +613,7 @@ class App:
                     self.v_eco, self.v_strength):
             var.trace_add("write", lambda *_: self._update_summary())
         self._apply_preset("heat")
+        self._load_prefs()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.bind("<Configure>", self._on_configure)
         self.root.after(60, self._relayout)
@@ -647,6 +649,15 @@ class App:
         self.v_srt = v.BooleanVar(value=False)
         self.v_gif = v.BooleanVar(value=False)
         self.v_json = v.BooleanVar(value=False)
+        # -- 进阶设置 (折叠在对话框里, 避免主界面拥挤) --
+        self.v_bgm = v.StringVar()
+        self.v_bgm_gain = v.DoubleVar(value=0.20)
+        self.v_speed = v.StringVar(value="1.0")
+        self.v_game = v.StringVar(value="1")
+        self.v_highlights = v.BooleanVar(value=False)
+        self.v_gif_fps = v.StringVar(value="10")
+        self.v_gif_scale = v.StringVar(value="0.4")
+        self.v_poster_move = v.StringVar()
         self.v_status = v.StringVar(value="就绪")
 
     def _style(self) -> None:
@@ -887,9 +898,12 @@ class App:
         specs = [
             ("棋谱信息", "info", "ghost"), ("预览画面", "preview", "ghost"),
             ("试运行", "dry", "ghost"), ("性能基准", "bench", "ghost"),
+            ("进阶…", "advanced", "ghost"),
         ]
         for text, mode, kind in specs:
-            b = GlassButton(bar, text, lambda m=mode: self._run(m),
+            cmd = (self._open_advanced if mode == "advanced"
+                   else lambda m=mode: self._run(m))
+            b = GlassButton(bar, text, cmd,
                             kind=kind, width=84, height=32, font=(_FF, 9))
             b.pack(side="left", padx=(0, 7))
             self.buttons[mode] = b
@@ -919,6 +933,202 @@ class App:
         self.log.pack(fill="x")
         self.log.text.configure(state="disabled")
         self._log("就绪。选择 SGF 棋谱后可直接点「开始渲染」，或先用「预览画面」看效果。")
+
+    # ------------------------------------------------------------------ #
+    # 偏好持久化
+    # ------------------------------------------------------------------ #
+    def _prefs_path(self) -> str:
+        return os.path.join(os.path.expanduser("~"), ".sgf-review", "gui.json")
+
+    def _load_prefs(self) -> None:
+        try:
+            with open(self._prefs_path(), "r", encoding="utf-8") as fh:
+                d = json.load(fh)
+        except Exception:
+            return
+        if not isinstance(d, dict):
+            return
+        mp = {"preset": self.v_preset, "theme": self.v_theme,
+              "size": self.v_size, "fps": self.v_fps,
+              "duration": self.v_duration, "quality": self.v_quality,
+              "codec": self.v_codec, "jobs": self.v_jobs,
+              "watermark": self.v_watermark, "kit": self.v_kit,
+              "labels": self.v_labels, "lang": self.v_lang,
+              "bgm": self.v_bgm, "speed": self.v_speed, "game": self.v_game,
+              "gif_fps": self.v_gif_fps, "gif_scale": self.v_gif_scale,
+              "poster_move": self.v_poster_move, "sgf": self.v_sgf,
+              "out": self.v_out}
+        for k, var in mp.items():
+            if k in d and isinstance(d[k], str):
+                var.set(d[k])
+        for k, var in (("heat", self.v_heat), ("analysis", self.v_analysis),
+                       ("comment", self.v_comment),
+                       ("transition", self.v_transition),
+                       ("legend", self.v_legend), ("chapters", self.v_chapters),
+                       ("poster", self.v_poster), ("skip", self.v_skip),
+                       ("eco", self.v_eco), ("srt", self.v_srt),
+                       ("gif", self.v_gif), ("json", self.v_json),
+                       ("highlights", self.v_highlights)):
+            if k in d:
+                var.set(bool(d[k]))
+        try:
+            if "strength" in d:
+                self.v_strength.set(float(d["strength"]))
+            if "bgm_gain" in d:
+                self.v_bgm_gain.set(float(d["bgm_gain"]))
+        except (TypeError, ValueError):
+            pass
+
+    def _save_prefs(self) -> None:
+        mp = {"preset": self.v_preset, "theme": self.v_theme,
+              "size": self.v_size, "fps": self.v_fps,
+              "duration": self.v_duration, "quality": self.v_quality,
+              "codec": self.v_codec, "jobs": self.v_jobs,
+              "watermark": self.v_watermark, "kit": self.v_kit,
+              "labels": self.v_labels, "lang": self.v_lang,
+              "bgm": self.v_bgm, "speed": self.v_speed, "game": self.v_game,
+              "gif_fps": self.v_gif_fps, "gif_scale": self.v_gif_scale,
+              "poster_move": self.v_poster_move, "sgf": self.v_sgf,
+              "out": self.v_out}
+        d = {k: var.get() for k, var in mp.items()}
+        d["strength"] = float(self.v_strength.get())
+        d["bgm_gain"] = float(self.v_bgm_gain.get())
+        for k, var in (("heat", self.v_heat), ("analysis", self.v_analysis),
+                       ("comment", self.v_comment),
+                       ("transition", self.v_transition),
+                       ("legend", self.v_legend), ("chapters", self.v_chapters),
+                       ("poster", self.v_poster), ("skip", self.v_skip),
+                       ("eco", self.v_eco), ("srt", self.v_srt),
+                       ("gif", self.v_gif), ("json", self.v_json),
+                       ("highlights", self.v_highlights)):
+            d[k] = bool(var.get())
+        try:
+            path = self._prefs_path()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(d, fh, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ #
+    # 进阶设置
+    # ------------------------------------------------------------------ #
+    def _open_advanced(self) -> None:
+        """低频参数收进独立玻璃面板, 主界面保持清爽."""
+        W, H, pad = 566, 432, 9
+        win = tk.Toplevel(self.root, bg=INK)
+        win.title("进阶设置")
+        win.transient(self.root)
+        win.resizable(False, False)
+        self.root.update_idletasks()
+        rx = self.root.winfo_rootx() + (self.root.winfo_width() - W) // 2
+        ry = self.root.winfo_rooty() + (self.root.winfo_height() - H) // 3
+        win.geometry(f"{W}x{H}+{max(0, rx)}+{max(0, ry)}")
+
+        cv = tk.Canvas(win, width=W, height=H, bg=INK,
+                       highlightthickness=0, bd=0)
+        cv.pack()
+        bgimg = build_backdrop(W, H)
+        panel = glass_panel(bgimg, (pad, pad, W - pad, H - pad),
+                            radius=20, blur=16, lift=1.05)
+        photo = ImageTk.PhotoImage(panel)
+        cv._photo = photo  # type: ignore[attr-defined]
+        cv.create_image(0, 0, image=photo, anchor="nw")
+
+        body = tk.Frame(cv, bg=PANE)
+        cv.create_window(pad + 13, pad + 12, window=body, anchor="nw",
+                         width=W - pad * 2 - 26, height=H - pad * 2 - 24)
+
+        head = tk.Frame(body, bg=PANE)
+        head.pack(fill="x", padx=12, pady=(8, 0))
+        tk.Label(head, text="进阶设置", bg=PANE, fg=ICE,
+                 font=(_FF, 13, "bold")).pack(anchor="w")
+        tk.Label(head, text="这些参数通常用默认值即可；关闭窗口后会自动记住。",
+                 bg=PANE, fg=DIM, font=(_FF, 8)).pack(anchor="w", pady=(2, 0))
+
+        g = tk.Frame(body, bg=PANE)
+        g.pack(fill="x", padx=12, pady=(10, 0))
+        g.grid_columnconfigure(1, weight=1)
+
+        def lab(text: str, r: int, c: int) -> None:
+            tk.Label(g, text=text, bg=PANE, fg=DIM, font=(_FF, 9),
+                     anchor="w").grid(row=r, column=c, sticky="w",
+                                      padx=(0 if c == 0 else 14, 8),
+                                      pady=(0 if r == 0 else 9, 0))
+
+        lab("背景音乐", 0, 0)
+        bg = tk.Frame(g, bg=PANE)
+        bg.grid(row=0, column=1, columnspan=3, sticky="ew")
+        bg.grid_columnconfigure(0, weight=1)
+        RoundEntry(bg, self.v_bgm, width=300, height=28).grid(
+            row=0, column=0, sticky="ew")
+        GlassButton(bg, "浏览", self._browse_bgm, width=54, height=28,
+                    font=(_FF, 8)).grid(row=0, column=1, padx=(7, 0))
+
+        lab("BGM 音量", 1, 0)
+        sm = tk.Frame(g, bg=PANE)
+        sm.grid(row=1, column=1, columnspan=3, sticky="w", pady=(9, 0))
+        GlassSlider(sm, self.v_bgm_gain, 0.0, 0.8, width=214).pack(side="left")
+
+        lab("播放速度", 2, 0)
+        sp = tk.Frame(g, bg=PANE)
+        sp.grid(row=2, column=1, sticky="w", pady=(9, 0))
+        RoundEntry(sp, self.v_speed, width=62, height=28).pack(side="left")
+        tk.Label(sp, text="倍 (1.0 原速)", bg=PANE, fg=FAINT,
+                 font=(_FF, 8)).pack(side="left", padx=(6, 0))
+        lab("合集局号", 2, 2)
+        gm = tk.Frame(g, bg=PANE)
+        gm.grid(row=2, column=3, sticky="w", pady=(9, 0))
+        RoundEntry(gm, self.v_game, width=62, height=28).pack(side="left")
+        tk.Label(gm, text="all 全部", bg=PANE, fg=FAINT,
+                 font=(_FF, 8)).pack(side="left", padx=(6, 0))
+
+        lab("关键手集锦", 3, 0)
+        GlassCheck(g, "另出失误/好手短片", self.v_highlights,
+                   font=(_FF, 9)).grid(row=3, column=1, columnspan=3,
+                                       sticky="w", pady=(9, 0))
+
+        lab("海报手数", 4, 0)
+        pm = tk.Frame(g, bg=PANE)
+        pm.grid(row=4, column=1, sticky="w", pady=(9, 0))
+        RoundEntry(pm, self.v_poster_move, width=62, height=28).pack(side="left")
+        tk.Label(g, text="留空 = 自动挑精彩处", bg=PANE, fg=FAINT,
+                 font=(_FF, 8)).grid(row=4, column=2, columnspan=2,
+                                     sticky="w", pady=(9, 0))
+
+        lab("GIF 帧率", 5, 0)
+        RoundEntry(g, self.v_gif_fps, width=62, height=28).grid(
+            row=5, column=1, sticky="w", pady=(9, 0))
+        lab("GIF 缩放", 5, 2)
+        RoundEntry(g, self.v_gif_scale, width=62, height=28).grid(
+            row=5, column=3, sticky="w", pady=(9, 0))
+
+        tip = tk.Label(body,
+                       text="BGM 支持 mp3 / wav / m4a，会自动循环到片尾；"
+                            "关键手集锦仅在勾选「导出」类选项后生成。",
+                       bg=PANE, fg=FAINT, font=(_FF, 8), justify="left",
+                       wraplength=460, anchor="w")
+        tip.pack(fill="x", padx=12, pady=(12, 0))
+
+        foot = tk.Frame(body, bg=PANE)
+        foot.pack(fill="x", side="bottom", padx=12, pady=(0, 10))
+        GlassButton(foot, "完成", win.destroy, kind="primary", width=96,
+                    height=32, font=(_FF, 9, "bold")).pack(side="right")
+        GlassButton(foot, "取消", win.destroy, width=80, height=32,
+                    font=(_FF, 9)).pack(side="right", padx=(0, 8))
+
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.grab_set()
+        win.lift()
+        win.focus_force()
+
+    def _browse_bgm(self) -> None:
+        p = filedialog.askopenfilename(
+            parent=self.root, title="选择背景音乐",
+            filetypes=[("音频", "*.mp3 *.wav *.m4a *.aac *.flac"),
+                       ("所有文件", "*.*")])
+        if p:
+            self.v_bgm.set(p)
 
     # ------------------------------------------------------------------ #
     def _pad(self, p: tk.Frame) -> tk.Frame:
@@ -1113,10 +1323,10 @@ class App:
         self.v_quality.set(p.get("quality", "high"))
         self.v_jobs.set(str(p.get("jobs", 0)))
         self.v_heat.set(bool(p.get("heatmap", False)))
-        self.v_eco.set(bool(p.get("eco", False)))
         self.v_labels.set(str(p.get("labels", "recent") or "recent"))
-        if p.get("eco", False):
-            self.v_eco.set(True)
+        # 低占用是用户长期偏好, 只有预设显式声明时才改动, 否则保留当前选择
+        if "eco" in p:
+            self.v_eco.set(bool(p["eco"]))
         self.preset_desc.configure(text=PRESET_DESC.get(key, ""))
         self._update_summary()
 
@@ -1197,6 +1407,18 @@ class App:
         wm = self.v_watermark.get().strip()
         if wm:
             a += ["--watermark", wm]
+        bgm = self.v_bgm.get().strip().strip('"')
+        if bgm:
+            a += ["--bgm", bgm]
+            gain = float(self.v_bgm_gain.get())
+            if abs(gain - 0.20) > 1e-6:
+                a += ["--bgm-gain", f"{gain:.2f}"]
+        spd = self.v_speed.get().strip()
+        if spd and spd not in ("1", "1.0"):
+            a += ["--speed", spd]
+        game = self.v_game.get().strip()
+        if game and game != "1":
+            a += ["--game", game]
         out = self.v_out.get().strip().strip('"')
         if out:
             a += ["-o", out]
@@ -1207,10 +1429,21 @@ class App:
                 a += ["--poster", stem + "_poster.png"]
             if self.v_srt.get():
                 a += ["--srt", stem + ".srt"]
-            if self.v_gif.get():
-                a += ["--gif", stem + ".gif"]
             if self.v_json.get():
                 a += ["--json", stem + ".json"]
+            if self.v_gif.get():
+                a += ["--gif", stem + ".gif"]
+                fps = self.v_gif_fps.get().strip()
+                if fps and fps != "10":
+                    a += ["--gif-fps", fps]
+                sc = self.v_gif_scale.get().strip()
+                if sc and sc != "0.4":
+                    a += ["--gif-scale", sc]
+            if self.v_highlights.get():
+                a += ["--highlights", stem + "_key.mp4"]
+            pm = self.v_poster_move.get().strip()
+            if pm:
+                a += ["--poster-move", pm]
         if mode == "info":
             a.append("--info")
         elif mode == "preview":
@@ -1433,6 +1666,7 @@ class App:
                 return
             self.cancelled = True
             self._stop()
+        self._save_prefs()
         shutil.rmtree(self.tmpdir, ignore_errors=True)
         self.root.destroy()
 

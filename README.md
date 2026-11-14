@@ -10,18 +10,19 @@ python3 sgf_review.py 棋谱.sgf -o 回顾.mp4
 
 > 20 秒看懂效果：`output/01_alphago_vs_leesedol.mp4`（AlphaGo vs 李世石第四局，带职业解说）
 
-## v2.1.0 更新
+## v3.0.0 更新 · 最终版
 
-- **全新液态玻璃界面**：重写桌面 GUI 视觉层——真实 backdrop blur（裁切背景→高斯模糊→提亮→内高光描边）的毛玻璃卡片、22px 圆角、外阴影浮层；胶囊按钮、圆形勾选、细轨道滑块、流光进度条全部自绘；深空渐变背景叠加四团柔光与细噪点。Windows 11 下自动启用深色标题栏与圆角窗口。
-- **Windows 稳定性修复**（上一版实际运行中暴露的问题）：
-  - 补齐 `multiprocessing.freeze_support()`，修复单文件 exe 创建进程池时反复重启自身；
-  - ffmpeg 子进程统一 `CREATE_NO_WINDOW`，不再反复闪黑框；
-  - Windows 默认收敛到单进程（onefile 每个 worker 都要解压一份，并行反而更慢）；`--eco` 下 ffmpeg 限 2 线程；
-  - 「停止」改用 `taskkill /T` 杀进程树，不再残留 ffmpeg 占用输出文件；
-  - 声明 per-monitor DPI 感知，高分屏不再整窗发虚；
-  - BGM 转码改用统一的 `ffmpeg_exe()` 探测，绿色版同目录的 ffmpeg 现在能被找到；
-  - 窗口尺寸按屏幕自适应，小屏笔记本不再把底部按钮顶出屏幕。
-- **v2.0 既有能力**：5 套一键预设、JSON 配置、`--dry-run` 试运行、`--benchmark` 性能基准、章节时间戳导出、低占用模式 `--eco`、断点续跑 `--skip-existing`，以及重做后的领地热力图。
+> **项目状态：已完成，进入稳定维护。**
+> 3.0 是功能与体验的收口版本：渲染引擎、桌面界面、Windows 绿色版、CI 回归与文档全部就绪并验证通过。后续只做问题修复，不再新增功能。
+
+- **修复 `--version` 重复注册导致的启动崩溃**：v2.x 的 argparse 里存在两个 `--version`，任何带该参数的调用都会抛 `conflicting option string`。GUI 正是通过子进程调用 CLI，这也是 Windows 版「一运行就出问题」的根因。
+- **AI 图表增强**：胜率图新增关键手竖虚线与底轴三角标记（自动取影响最大的三手），X 轴补手数刻度，可直接看出第几手崩盘。`key_marks` 此前只传入未绘制，现已真正生效。
+- **提子浮字**：提子瞬间在提子质心上方浮出 `+n` 并淡出，不再只靠棋子消失表达。
+- **落子音效包**：新增 `--kit {kaya,slate,paper,ice}` 四套音色（榧木 / 石板 / 纸面 / 清脆），提子音同步变化。
+- **进阶设置面板**：GUI 新增液态玻璃风格「进阶…」对话框，补齐背景音乐与音量、播放速度、合集局号、关键手集锦、GIF 帧率/缩放、海报手数——这些此前只能在命令行使用。
+- **偏好记忆**：关闭窗口自动保存到 `~/.sgf-review/gui.json`，下次启动恢复上次的棋谱、参数与开关状态。
+- **工程收口**：`tools/selftest.py`（30 项解析 / 棋盘 / CLI 回归）+ GitHub Actions `selftest.yml`（Linux 跑回归与 6 秒渲染冒烟）；补 MIT 许可证。
+- **沿用 v2.1 的 Windows 修复**：`freeze_support`、子进程 `CREATE_NO_WINDOW`、默认单进程、`taskkill /T` 杀进程树、per-monitor DPI 感知、`ffmpeg_exe()` 统一探测、窗口按屏幕自适应。
 - **Windows 免安装绿色版**：[Releases](https://github.com/290354/sgf-review/releases) 下载 `sgf-review-win64.zip`，解压即用，无需 Python；包内已附带 `ffmpeg.exe`。
 
 详见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
@@ -151,7 +152,9 @@ Windows 用户可直接从 [Releases](https://github.com/290354/sgf-review/relea
 
 界面提供：棋谱/输出选择、2×2 分镜预览、当前配置摘要、5 套预设、6 套主题、
 分辨率/帧率/时长/画质/编码、水印、热力图浓度、渲染开关、
-**棋谱信息 / 预览画面 / 试运行 / 性能基准 / 开始渲染 / 停止**、实时日志与进度条。
+**棋谱信息 / 预览画面 / 试运行 / 性能基准 / 进阶… / 开始渲染 / 停止**、实时日志与进度条。
+「进阶…」里可设背景音乐、BGM 音量、播放速度、合集局号、关键手集锦、GIF 帧率/缩放与海报手数。
+关闭窗口时自动记住全部参数（`~/.sgf-review/gui.json`），下次打开即恢复。
 渲染在独立子进程执行，界面始终流畅；默认开启低占用模式。
 
 同一个 exe 也保留完整命令行：
@@ -378,3 +381,20 @@ python3 tools/fetch_records.py pro alphago
 | `output/06_analysis_vertical.mp4` | 同一局竖屏版，曲线并排 · 1:00 |
 | `output/08_kejie_lg_final.mp4` | 第29届LG杯决赛第1局 柯洁 vs 卞相壹，98% 覆盖 · 2:15 |
 | `output/09_kejie_lg_vertical.mp4` | 同一局竖屏版 · 1:00 |
+
+---
+
+## 项目状态
+
+**已完成。** 3.0.0 是本项目的收口版本，功能范围到此为止。
+
+| 维度 | 状态 |
+|---|---|
+| 渲染引擎（SGF / 棋盘 / 动画 / 面板 / 音效 / 编码） | 完成 |
+| 领地热力图（连续场 / 主题配色 / 淡入与 crossfade） | 完成 |
+| 桌面界面（液态玻璃 / 预览 / 进阶设置 / 偏好记忆） | 完成 |
+| Windows 绿色版（单文件 exe + 内置 ffmpeg） | 完成 |
+| 回归（30 项 selftest / 297 组逐帧压测 / CI） | 完成 |
+| 文档（README / RELEASE_NOTES / 使用说明） | 完成 |
+
+后续仅接受缺陷修复，不再规划新功能。遇到问题请提 [Issue](https://github.com/290354/sgf-review/issues)。

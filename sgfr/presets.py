@@ -45,7 +45,7 @@ CONFIG_KEYS = (
     "theme", "size", "fps", "speed", "duration", "labels", "label_count",
     "lang", "watermark", "bgm_gain", "line", "game", "quality", "codec",
     "jobs", "intro", "outro", "preset", "heatmap", "heat_strength",
-    "eco", "skip_existing",
+    "eco", "skip_existing", "kit",
     "no_comment", "no_coords", "no_audio", "no_analysis",
     "no_ai_commentary", "no_intro", "no_outro", "gif_fps", "gif_scale",
 )

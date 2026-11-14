@@ -215,6 +215,22 @@ class CurveChart:
             draw(self.values2, alt, max(1.0, 1.4 * k), 10)
         draw(self.values, main, max(1.4, 2.2 * k), 40)
 
+        # 关键手参考线: 只取影响最大的三手, 极淡虚线, 不压住曲线
+        if self.kind == "winrate" and self.key_marks:
+            marks = sorted(self.key_marks, key=lambda m: -abs(m[1]))[:3]
+            top = self.plot_top * SS
+            bot = self.plot_bot * SS
+            for idx, swing, _color in marks:
+                if not 0 <= idx < len(self.values):
+                    continue
+                x = self._xy(idx, self.vmin)[0] * SS
+                col = (0.92, 0.36, 0.32) if swing < 0 else (0.36, 0.80, 0.58)
+                y = top
+                while y < bot:
+                    d.line([(x, y), (x, min(y + 2.4 * SS, bot))],
+                           fill=_col(col, 64), width=max(1, int(SS * 0.8)))
+                    y += 6.4 * SS
+
         # 关键点标记(仅胜率图)
         if self.kind == "winrate":
             for i, v in enumerate(self.values):
