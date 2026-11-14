@@ -91,7 +91,9 @@ class CurveChart:
                  vmin: float = 0.0, vmax: float = 100.0,
                  baseline: float = 50.0, ticks: Sequence[float] = (),
                  show_visits: Optional[Sequence[Optional[float]]] = None,
-                 lang: str = "zh"):
+                 lang: str = "zh",
+                 move_numbers: Optional[Sequence[int]] = None,
+                 key_marks: Optional[Sequence[Tuple[int, float, int]]] = None):
         self.box = box
         self.values = list(values)
         self.values2 = list(values2) if values2 else None
@@ -105,13 +107,15 @@ class CurveChart:
         self.ticks = list(ticks)
         self.lang = lang
         self.show_visits = list(show_visits) if show_visits else None
+        self.move_numbers = list(move_numbers) if move_numbers else None
+        self.key_marks = list(key_marks) if key_marks else None
 
         self.w, self.h = max(2, int(box.w)), max(2, int(box.h))
         self.pad_l = int(27 * k)
-        self.pad_r = int(3 * k)
+        self.pad_r = int(10 * k)
         self.head = int(20 * k)
         self.plot_top = self.head + int(6 * k)
-        self.plot_bot = self.h - int(14 * k)
+        self.plot_bot = self.h - int(18 * k)
         self.bg = self._build_bg()
         self.line = self._build_line()
         self.line_faint = self.line.copy()
@@ -169,7 +173,20 @@ class CurveChart:
             txt = f"{t:g}" if self.kind == "lead" else f"{t:.0f}"
             bb = d.textbbox((0, 0), txt, font=f)
             d.text((self.pad_l * SS - bb[2] - 3 * SS, y - (bb[3] - bb[1]) / 2 - bb[1]),
-                   txt, font=f, fill=_col(th.faint, 170))
+                   txt, font=f, fill=_col(th.faint, 180))
+
+        # X 轴手数刻度
+        if self.move_numbers:
+            n = len(self.move_numbers)
+            f2 = font("sans", max(8, int(8 * k * SS)))
+            step = max(1, (n - 1) // 4)
+            targets = list(range(0, n - 1, step))
+            targets.append(n - 1)
+            for i in targets:
+                x, _ = self._xy(i, self.vmin)
+                txt = str(self.move_numbers[i])
+                d.text((x * SS, self.plot_bot * SS + 3 * SS), txt,
+                       font=f2, fill=_col(th.faint, 150), anchor="ma")
         return img.resize((self.w, self.h), Image.LANCZOS)
 
     def _build_line(self) -> Image.Image:
@@ -203,19 +220,29 @@ class CurveChart:
             for i, v in enumerate(self.values):
                 if v is None:
                     continue
-                an = None
                 x, y = self._xy(i, v)
-                # 用变化量判断是否打点
                 prev = self.values[i - 1] if i > 0 else None
                 if prev is None:
                     continue
                 dv = v - prev
                 if abs(dv) >= 9.0:
-                    r = max(2.0, 2.4 * k) * SS
+                    big = abs(dv) >= 15.0
+                    r = (max(2.6, 3.0 * k) if big else max(2.0, 2.4 * k)) * SS
                     col = (0.90, 0.36, 0.32) if dv < 0 else (0.38, 0.80, 0.58)
                     d.ellipse([x * SS - r, y * SS - r, x * SS + r, y * SS + r],
-                              fill=_col(col, 235), outline=_col(th.bg.bottom, 160),
+                              fill=_col(col, 240), outline=_col(th.bg.bottom, 180),
                               width=max(1, int(SS * 0.8)))
+                    if big:
+                        # 严重失误/好手: 底轴小三角
+                        tri = 3.2 * k * SS
+                        ty = self.plot_bot * SS + 2 * SS
+                        cc = _col(col, 220)
+                        if dv < 0:
+                            d.polygon([(x * SS, ty + tri), (x * SS - tri * 0.7, ty),
+                                       (x * SS + tri * 0.7, ty)], fill=cc)
+                        else:
+                            d.polygon([(x * SS, ty), (x * SS - tri * 0.7, ty + tri),
+                                       (x * SS + tri * 0.7, ty + tri)], fill=cc)
         return img.resize((self.w, self.h), Image.LANCZOS)
 
     # ------------------------------------------------------------------ #
@@ -322,6 +349,8 @@ def build_chart_set(x: int, y: int, w: int, h: int, series: AnalysisSeries,
         ticks=[0, 25, 50, 75, 100],
         show_visits=visits,
         lang=lang,
+        move_numbers=list(range(1, len(series.black_wr) + 1)),
+        key_marks=[(m.index, m.swing, m.color) for m in series.key_moments],
     )
     lead = None
     if lead_box is not None:

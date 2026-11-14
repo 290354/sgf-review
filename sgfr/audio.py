@@ -28,42 +28,54 @@ def _bandpass(sig: np.ndarray, sr: int, lo: float, hi: float) -> np.ndarray:
 
 
 def _click(seed: int, pitch: float = 1.0, bright: float = 1.0,
-           gain: float = 1.0) -> np.ndarray:
-    """一次棋子落盘: 噪声瞬态 + 木质模态共振."""
+           gain: float = 1.0, kit: str = "kaya") -> np.ndarray:
+    """一次棋子落盘: 噪声瞬态 + 木质模态共振.
+
+    kit: kaya 榧木 / slate 石板 / paper 纸面 / ice 清脆
+    """
+    presets = {
+        "kaya":  dict(modes=[(298, 0.052, 0.52), (474, 0.038, 0.40), (742, 0.024, 0.30),
+                             (1290, 0.015, 0.20), (2140, 0.0085, 0.13)],
+                      body_g=0.62, low=118, bright=1.0),
+        "slate": dict(modes=[(420, 0.038, 0.48), (880, 0.022, 0.36), (1420, 0.014, 0.24),
+                             (2400, 0.008, 0.16), (3600, 0.005, 0.10)],
+                      body_g=0.48, low=90, bright=1.15),
+        "paper": dict(modes=[(220, 0.070, 0.42), (360, 0.048, 0.34), (560, 0.030, 0.26),
+                             (880, 0.018, 0.18), (1400, 0.010, 0.12)],
+                      body_g=0.55, low=95, bright=0.85),
+        "ice":   dict(modes=[(580, 0.028, 0.50), (1180, 0.016, 0.40), (1980, 0.010, 0.28),
+                             (3200, 0.006, 0.18), (4800, 0.004, 0.10)],
+                      body_g=0.36, low=140, bright=1.35),
+    }
+    P = presets.get(kit, presets["kaya"])
     rng = np.random.default_rng(seed)
     dur = 0.30
     n = int(SR * dur)
     t = np.arange(n, dtype=np.float32) / SR
 
-    # 1) 接触瞬态
     noise = rng.normal(0.0, 1.0, n).astype(np.float32)
-    noise = _bandpass(noise, SR, 1100 * bright, 9500 * bright).astype(np.float32)
+    noise = _bandpass(noise, SR, 1100 * bright * P["bright"], 9500 * bright * P["bright"]).astype(np.float32)
     trans = noise * np.exp(-t / 0.0055) * 0.55
 
-    # 2) 木质模态 (轻微随机失谐, 避免机械重复)
     det = 1.0 + rng.normal(0.0, 0.012)
-    modes = [(298, 0.052, 0.52), (474, 0.038, 0.40), (742, 0.024, 0.30),
-             (1290, 0.015, 0.20), (2140, 0.0085, 0.13)]
     body = np.zeros(n, dtype=np.float32)
-    for i, (f, tau, amp) in enumerate(modes):
+    for f, tau, amp in P["modes"]:
         phase = rng.random() * 2 * math.pi
         body += (amp * np.sin(2 * math.pi * f * pitch * det * t + phase)
                  * np.exp(-t / tau)).astype(np.float32)
 
-    # 3) 低频"体感"
-    body += (0.22 * np.sin(2 * math.pi * 118 * pitch * t)
+    body += (0.22 * np.sin(2 * math.pi * P["low"] * pitch * t)
              * np.exp(-t / 0.045)).astype(np.float32)
 
-    # 4) 起振包络
     attack = (1.0 - np.exp(-t / 0.0006)).astype(np.float32)
-    sig = (trans + body * 0.62) * attack
+    sig = (trans + body * P["body_g"]) * attack
     sig *= np.exp(-t / 0.11)
     return (sig * gain).astype(np.float32)
 
 
-def _capture_sound(seed: int) -> np.ndarray:
-    a = _click(seed, pitch=1.34, bright=1.25, gain=0.30)
-    b = _click(seed + 1, pitch=1.52, bright=1.30, gain=0.18)
+def _capture_sound(seed: int, kit: str = "kaya") -> np.ndarray:
+    a = _click(seed, pitch=1.34, bright=1.25, gain=0.30, kit=kit)
+    b = _click(seed + 1, pitch=1.52, bright=1.30, gain=0.18, kit=kit)
     shift = int(SR * 0.035)
     out = np.zeros(len(a) + shift, dtype=np.float32)
     out[:len(a)] += a
@@ -182,7 +194,8 @@ class Mixer:
 
 # --------------------------------------------------------------------------- #
 def build_audio(review, timeline, path: str, mode: str = "click",
-                bgm: Optional[str] = None, bgm_gain: float = 0.20) -> None:
+                bgm: Optional[str] = None, bgm_gain: float = 0.20,
+                kit: str = "kaya") -> None:
     mixer = Mixer(timeline.total)
     if mode not in ("none", "off", "silent"):
         # 片头: 极轻的空气声
@@ -198,14 +211,14 @@ def build_audio(review, timeline, path: str, mode: str = "click",
             pan *= 0.45
             pitch = 0.94 if mv.color == 1 else 1.07
             gain = 0.85 + 0.15 * ((slot.index * 37) % 5) / 4.0
-            mixer.add(_click(1000 + slot.index * 7, pitch=pitch, gain=gain),
+            mixer.add(_click(1000 + slot.index * 7, pitch=pitch, gain=gain, kit=kit),
                       at, pan, 0.62)
             if mv.captured:
-                mixer.add(_capture_sound(2000 + slot.index * 3),
+                mixer.add(_capture_sound(2000 + slot.index * 3, kit=kit),
                           at + 0.045, pan * 0.8, 0.55)
 
         # 片尾: 一声收束
-        mixer.add(_click(9999, pitch=0.86, gain=0.55),
+        mixer.add(_click(9999, pitch=0.86, gain=0.55, kit=kit),
                   timeline.outro_start + 0.10, 0.0, 0.5)
         mixer.add(_soft_whoosh(23, 1.2), timeline.outro_start + 0.2, 0.0, 0.7)
 

@@ -1,5 +1,7 @@
 # SGF Review · 围棋对局回顾视频生成器
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 把任意 SGF 棋谱渲染成一条**电影感的对局回顾视频**：榧木棋盘、立体棋子、落子动画、提子效果、职业解说字幕、木质落子音效，全部由程序生成，不依赖任何素材包。
 
 ```bash
@@ -105,6 +107,7 @@ python3 sgf_review.py records/ --skip-existing --preset eco
 | `--bgm` | 背景音乐（mp3/wav/m4a），会与落子音效自动混音 |
 | `--bgm-gain` | BGM 音量 0~1，默认 0.20 |
 | `--no-audio` | 关闭落子音效 |
+| `--kit` | 落子音效包：`kaya` 榧木 / `slate` 石板 / `paper` 纸面 / `ice` 清脆 |
 | `--no-analysis` | 关闭 AI 分析面板（即使棋谱带 LizzieYzy 数据） |
 | `--heatmap` | 在棋盘上叠加 AI 领地热力图（需 ownership 数据） |
 | `--no-ai-commentary` | 关闭根据胜率变化自动生成的点评字幕 |
@@ -358,6 +361,10 @@ python3 tools/fetch_records.py pro alphago
 ```
 
 对局棋谱本身通常不构成作品，但**解说文字有版权**（如 AlphaGo 对局的樊麾评注），用于公开发布前请自行确认授权。
+
+## 许可证
+
+本项目代码采用 [MIT License](LICENSE) 发布；`records/` 下的棋谱数据各自遵从其来源归档的条款，不随本项目许可证分发。
 
 ## 9. 演示视频
 

@@ -635,6 +635,24 @@ class Renderer:
                 self._text(img, (cx, cy), txt, "serif_bold", fs,
                            self.th.text, "mm", a * 0.85, 0.18 * fs)
 
+        # ---- 提子浮字 ----
+        if mv is not None and getattr(mv, "captured", None) and slot is not None:
+            rt = (t - slot.start - slot.anim * 0.55) / 0.85
+            if 0.0 <= rt <= 1.0:
+                e = ease_out_cubic(rt)
+                a = (1.0 - rt) ** 1.6
+                n = len(mv.captured)
+                # 浮字锚在提子质心上方
+                gx = sum(p[0] for p in mv.captured) / n
+                gy = sum(p[1] for p in mv.captured) / n
+                cx, cy = self.canvas.center(gx, gy)
+                cx += L.board_x
+                cy += L.board_y - self.canvas.stone_r * (0.6 + 1.4 * e)
+                txt = f"+{n}"
+                fs = int(16 * self.unit)
+                self._text(img, (cx, cy), txt, "sans_bold", fs,
+                           self.th.accent, "mm", a, 0.04 * fs)
+
         # ---- AI 推荐点(下一手) ----
         if self.show_analysis:
             self._draw_ai_overlay(img, idx, t)

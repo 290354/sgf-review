@@ -56,6 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bgm", default=None, help="背景音乐文件 (mp3/wav/m4a)")
     p.add_argument("--bgm-gain", type=float, default=0.20, help="BGM 音量 0~1")
     p.add_argument("--no-audio", action="store_true", help="不生成落子音效")
+    p.add_argument("--kit", default="kaya",
+                   choices=["kaya", "slate", "paper", "ice"],
+                   help="落子音效包: kaya 榧木 / slate 石板 / paper 纸面 / ice 清脆")
     p.add_argument("--no-analysis", action="store_true",
                    help="不显示 AI 分析面板(即使棋谱含 LizzieYzy 分析数据)")
     p.add_argument("--heatmap", action="store_true",
@@ -95,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--outro", type=float, default=3.4, help="片尾时长秒")
     p.add_argument("--no-intro", action="store_true", help="不要片头")
     p.add_argument("--no-outro", action="store_true", help="不要片尾")
+    p.add_argument("--version", action="store_true", help="打印版本")
     p.add_argument("--info", action="store_true", help="只打印棋谱信息")
     p.add_argument("--list-themes", action="store_true", help="列出所有主题")
     p.add_argument("--list-presets", action="store_true", help="列出所有预设方案")
@@ -433,7 +437,8 @@ def run_one(args, path: str, out_path: Optional[str]) -> int:
             if has_audio:
                 saudio.build_audio(rv, tl, wav,
                                    mode="none" if args.no_audio else "click",
-                                   bgm=args.bgm, bgm_gain=args.bgm_gain)
+                                   bgm=args.bgm, bgm_gain=args.bgm_gain,
+                                   kit=getattr(args, "kit", "kaya"))
 
             jobs = args.jobs
             if jobs <= 0:
