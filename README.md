@@ -21,7 +21,7 @@ python3 sgf_review.py 棋谱.sgf -o 回顾.mp4
 - **落子音效包**：新增 `--kit {kaya,slate,paper,ice}` 四套音色（榧木 / 石板 / 纸面 / 清脆），提子音同步变化。
 - **进阶设置面板**：GUI 新增液态玻璃风格「进阶…」对话框，补齐背景音乐与音量、播放速度、合集局号、关键手集锦、GIF 帧率/缩放、海报手数——这些此前只能在命令行使用。
 - **偏好记忆**：关闭窗口自动保存到 `~/.sgf-review/gui.json`，下次启动恢复上次的棋谱、参数与开关状态。
-- **工程收口**：`tools/selftest.py`（30 项解析 / 棋盘 / CLI 回归）+ GitHub Actions `selftest.yml`（Linux 跑回归与 6 秒渲染冒烟）；补 MIT 许可证。
+- **工程收口**：`tools/selftest.py`（35 项解析 / 棋盘 / CLI 回归）+ GitHub Actions `selftest.yml`（Linux 跑回归与 6 秒渲染冒烟）；补 MIT 许可证。
 - **沿用 v2.1 的 Windows 修复**：`freeze_support`、子进程 `CREATE_NO_WINDOW`、默认单进程、`taskkill /T` 杀进程树、per-monitor DPI 感知、`ffmpeg_exe()` 统一探测、窗口按屏幕自适应。
 - **Windows 免安装绿色版**：[Releases](https://github.com/290354/sgf-review/releases) 下载 `sgf-review-win64.zip`，解压即用，无需 Python；包内已附带 `ffmpeg.exe`。
 
@@ -394,7 +394,16 @@ python3 tools/fetch_records.py pro alphago
 | 领地热力图（连续场 / 主题配色 / 淡入与 crossfade） | 完成 |
 | 桌面界面（液态玻璃 / 预览 / 进阶设置 / 偏好记忆） | 完成 |
 | Windows 绿色版（单文件 exe + 内置 ffmpeg） | 完成 |
-| 回归（30 项 selftest / 297 组逐帧压测 / CI） | 完成 |
+| 回归（35 项 selftest / 297 组逐帧压测 / CI） | 完成 |
 | 文档（README / RELEASE_NOTES / 使用说明） | 完成 |
 
 后续仅接受缺陷修复，不再规划新功能。遇到问题请提 [Issue](https://github.com/290354/sgf-review/issues)。
+
+### 2026-11-14 维护修订
+
+v3.0.0 以同一版本号重新发布，仅含两处缺陷修复，Windows 绿色版已重新打包：
+
+- 让子棋显式写的 `KM[0]`（0 贴目）不再被误判为「未写贴目」而改写成 0.5；单局与合集两条解析路径现在结果一致。
+- `--chapters` 导出的章节不再出现「第 21 手 · 第 21 手」这类重复标题。
+
+`tools/selftest.py` 由 30 项增至 35 项，新增断言覆盖上述两处。详见 [RELEASE_NOTES.md](RELEASE_NOTES.md) 第七节。
